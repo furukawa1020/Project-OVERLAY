@@ -9,8 +9,8 @@ import (
 	"math"
 	"math/rand"
 	"net/url"
+	"time"
 
-	"github.com/gen2brain/malgo"
 	"github.com/gorilla/websocket"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -49,48 +49,23 @@ type Game struct {
 	jpFaceBig font.Face
 
 	// Audio
-	speech     *SpeechEngine
-	audioChan  chan float64 
-	
+	speech    *SpeechEngine
+	audioChan chan float64
+
 	micVolume  float64 // 0.0 - 1.0 (Smoothed)
 	peakVolume float64
-	
+
 	// Visuals
-	frameCount int
+	frameCount  int
 	videoGlitch float64 // For Shaft cut effect
-	words      []string 
-	flashWord  string
-	flashTTL   int
+	words       []string
+	flashWord   string
+	flashTTL    int
 }
-
-// Audio Callback
-func onRecvFrames(pOutputSample, pInputSample []byte, framecount uint32) {
-	// Calculate RMS (roughly)
-	// Input is assumed S16 (2 bytes per sample)
-	// Very naive implementation for visualization
-	sum := 0.0
-	count := int(framecount) * 2 // Stereo? No, assuming mono/stereo depending on config but taking all bytes
-	// Safe casting for S16 LE
-	for i := 0; i < len(pInputSample); i += 2 {
-		if i+1 >= len(pInputSample) {
-			break
-		}
-		v16 := int16(uint16(pInputSample[i]) | uint16(pInputSample[i+1])<<8)
-		val := float64(v16) / 32768.0
-		sum += val * val
-	}
-	rms := math.Sqrt(sum / float64(framecount))
-	// Pass to channel or global? For simplicity in this demo, accessing atomic/global might be needed,
-	// but ebiten runs on main thread. We use channel.
-	// This function is currently not used as audio is handled by SpeechEngine.
-	// If it were used, it would need access to the game's audioChan.
-	// audioChan <- rms
-}
-
 
 func (g *Game) Update() error {
 	g.frameCount++
-	
+
 	// Init channel if nil (hacky lazy init or do in main)
 	if g.audioChan == nil {
 		g.audioChan = make(chan float64, 10)
@@ -122,12 +97,15 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	// Shaft Aesthetic: Sharp Cuts based on state
-	// Background
+	// Shaft Style Background Logic
+	// SPLIT -> Red Background, Black Text (High Alert)
+	// ALIGNED -> White Background, Black Text (Clarity)
+	// UNKNOWN -> Black Background, White Text (Mystery)
+
 	bgColor := ColBlack
-	if g.state.CurrentState == "SPLIT" && g.frameCount%10 < 5 {
+	if g.state.CurrentState == "SPLIT" {
+		bgColor = ColRed
 		// Strobe effect on critical split
-		bgColor = color.RGBA{30, 0, 0, 255}
 	}
 	screen.Fill(bgColor)
 
@@ -206,6 +184,11 @@ func (g *Game) drawTypography(screen *ebiten.Image) {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(float64(x), float64(y))
 
+		// Scale (Shaft Pulse)
+		op.GeoM.Translate(float64(-x), float64(-y)) // Center for scaling
+		op.GeoM.Scale(sizeScale, sizeScale)
+		op.GeoM.Translate(float64(x), float64(y)) // Move back
+
 		// Tilt (Shaft Head Tilt)
 		op.GeoM.Rotate(0.1 * math.Sin(float64(g.frameCount)*0.05))
 
@@ -218,21 +201,34 @@ func (g *Game) Layout(w, h int) (int, int) {
 }
 
 func (g *Game) connect() {
-	u := url.URL{Scheme: "ws", Host: ServerHost, Path: "/cable"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return
-	}
-	g.conn = c
-
 	go func() {
-		defer c.Close()
 		for {
-			_, message, err := c.ReadMessage()
+			u := url.URL{Scheme: "ws", Host: ServerHost, Path: "/cable"}
+			log.Printf("Connecting to %s...", u.String())
+
+			c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 			if err != nil {
-				return
+				log.Printf("Connection failed: %v. Retrying in 1s...", err)
+				time.Sleep(1 * time.Second)
+				continue
 			}
-			g.handleMessage(message)
+
+			log.Println("Connected to Server!")
+			g.conn = c
+
+			// Listen loop
+			for {
+				_, message, err := c.ReadMessage()
+				if err != nil {
+					log.Println("Read error (Disconnected):", err)
+					break // Break inner loop to reconnect
+				}
+				g.handleMessage(message)
+			}
+
+			g.conn.Close()
+			g.conn = nil
+			time.Sleep(1 * time.Second)
 		}
 	}()
 }
@@ -283,16 +279,16 @@ func main() {
 	game := &Game{
 		audioChan: make(chan float64, 10), // Initialize game's audioChan
 	}
-	game.jpFace = loadFont(64)   // Standard Text
+	game.jpFace = loadFont(64)     // Standard Text
 	game.jpFaceBig = loadFont(200) // Huge Impact Text
 	game.connect()
-	
+
 	// Start Speech Engine
 	se := NewSpeechEngine()
 	if se != nil {
 		game.speech = se
 		go se.Start()
-		
+
 		// Pipe channels
 		go func() {
 			for {
@@ -303,7 +299,7 @@ func main() {
 					// Received recognized text!
 					// Force flash this word
 					fmt.Printf("RECOGNIZED: %s\n", txt)
-					
+
 					// Trigger standard "Flash" logic
 					// Since this is a game loop, we should guard access or just set it
 					// This runs in background, Game.Draw/Update runs in main thread.
@@ -316,10 +312,11 @@ func main() {
 	} else {
 		log.Println("Speech Engine failed to initialize (Missing model?)")
 	}
-	
+
 	ebiten.SetWindowSize(ScreenWidth/2, ScreenHeight/2)
 	ebiten.SetWindowTitle("OVERLAY")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	if err := ebiten.RunGame(game); err != nil { log.Fatal(err) }
+	if err := ebiten.RunGame(game); err != nil {
+		log.Fatal(err)
+	}
 }
-```

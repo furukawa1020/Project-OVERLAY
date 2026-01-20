@@ -6,7 +6,7 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/alphacep/vosk-api/go/vosk"
+	vosk "github.com/alphacep/vosk-api/go"
 	"github.com/gen2brain/malgo"
 )
 

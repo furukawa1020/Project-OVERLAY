@@ -63,9 +63,7 @@
 
     <div class="section">
         <h2>Manual Triggers</h2>
-        <button class="btn-warn" onclick="sendCommand('flash', {word: '決定？'})">Flash: 決定？</button>
-        <button class="btn-warn" onclick="sendCommand('flash', {word: '未共有'})">Flash: 未共有</button>
-        <button class="btn-warn" onclick="sendCommand('flash', {word: '時間'})">Flash: 時間</button>
+        <div id="trigger-buttons">Loading...</div>
     </div>
 
     <div class="section">
@@ -81,7 +79,31 @@
 
         ws.onopen = () => {
             document.getElementById('status').innerText = 'Connected';
+            loadConfig();
         };
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/config');
+                const config = await res.json();
+                const container = document.getElementById('trigger-buttons');
+                container.innerHTML = '';
+
+                // config.danger_words or config.words depending on app.rb
+                const words = config.danger_words || config.words || [];
+
+                words.forEach(word => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-warn';
+                    btn.textContent = `Flash: ${word}`;
+                    btn.style.margin = "5px";
+                    btn.onclick = () => sendCommand('flash', { word });
+                    container.appendChild(btn);
+                });
+            } catch (e) {
+                console.error("Failed to load config", e);
+            }
+        }
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);

@@ -37,7 +37,7 @@ end
 get '/config' do
   content_type :json
   {
-    words: Config::DANGER_WORDS,
+    danger_words: Config::DANGER_WORDS,
     thresholds: {
       no: Config::THRESHOLD_NO,
       split: Config::THRESHOLD_SPLIT
