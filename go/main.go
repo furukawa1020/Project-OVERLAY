@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"time"
 
+	"sync"
+
 	"github.com/gorilla/websocket"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -43,6 +45,7 @@ type State struct {
 }
 
 type Game struct {
+	mu        sync.RWMutex
 	conn      *websocket.Conn
 	state     State
 	jpFace    font.Face
@@ -64,6 +67,7 @@ type Game struct {
 }
 
 func (g *Game) Update() error {
+	g.mu.Lock()
 	g.frameCount++
 
 	// Init channel if nil (hacky lazy init or do in main)
@@ -92,18 +96,24 @@ func (g *Game) Update() error {
 			g.flashWord = ""
 		}
 	}
+	g.mu.Unlock()
 
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	g.mu.RLock()
+	currentState := g.state.CurrentState
+	vol := g.micVolume
+	g.mu.RUnlock()
+
 	// Shaft Style Background Logic
 	// SPLIT -> Red Background, Black Text (High Alert)
 	// ALIGNED -> White Background, Black Text (Clarity)
 	// UNKNOWN -> Black Background, White Text (Mystery)
 
 	bgColor := ColBlack
-	if g.state.CurrentState == "SPLIT" {
+	if currentState == "SPLIT" {
 		bgColor = ColRed
 		// Strobe effect on critical split
 	}
@@ -116,15 +126,20 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawTypography(screen)
 
 	// Debug info
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("Vol: %.2f | State: %s", g.micVolume, g.state.CurrentState))
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("Vol: %.2f | State: %s", vol, currentState))
 }
 
 func (g *Game) drawGeometry(screen *ebiten.Image) {
 	cx, cy := float32(ScreenWidth/2), float32(ScreenHeight/2)
 
+	g.mu.RLock()
+	micVolume := g.micVolume
+	currentState := g.state.CurrentState
+	g.mu.RUnlock()
+
 	// Audio Reactive Circle/Line
-	radius := float32(200.0 + g.micVolume*400.0)
-	thickness := float32(2.0 + g.micVolume*10.0)
+	radius := float32(200.0 + micVolume*400.0)
+	thickness := float32(2.0 + micVolume*10.0)
 
 	// Rotate based on time
 	theta := float64(g.frameCount) * 0.02
@@ -136,7 +151,7 @@ func (g *Game) drawGeometry(screen *ebiten.Image) {
 	y2 := cy - float32(math.Sin(theta))*radius
 
 	col := ColWhite
-	if g.state.CurrentState == "SPLIT" {
+	if currentState == "SPLIT" {
 		col = ColRed
 		// Double Line
 		vector.StrokeLine(screen, x1+20, y1, x2+20, y2, thickness, col, true)
@@ -150,20 +165,26 @@ func (g *Game) drawTypography(screen *ebiten.Image) {
 
 	// Priority: Flash Word from Ruby > Audio Reactive Noise
 
+	g.mu.RLock()
+	flashWord := g.flashWord
+	micVolume := g.micVolume
+	currentState := g.state.CurrentState
+	g.mu.RUnlock()
+
 	var textToDraw string
 	var sizeScale float64 = 1.0
 	var clr color.Color = ColWhite
 
-	if g.flashWord != "" {
-		textToDraw = g.flashWord
+	if flashWord != "" {
+		textToDraw = flashWord
 		sizeScale = 2.0
 		clr = ColRed
-	} else if g.micVolume > 0.1 && g.frameCount%20 == 0 {
+	} else if micVolume > 0.1 && g.frameCount%20 == 0 {
 		// Simulated conversational noise (if we had STT, this would be real words)
 		// For now, use abstract symbols or Kanat
 		opts := []string{"認識", "齟齬", "継続", "停止", "？", "..."}
 		textToDraw = opts[rand.Intn(len(opts))]
-		sizeScale = 0.5 + g.micVolume
+		sizeScale = 0.5 + micVolume
 		clr = ColYellow
 	}
 
@@ -173,7 +194,7 @@ func (g *Game) drawTypography(screen *ebiten.Image) {
 
 		// Randomize position slightly for "Unease"
 		jitter := 0
-		if g.state.CurrentState == "SPLIT" {
+		if currentState == "SPLIT" {
 			jitter = rand.Intn(50) - 25
 		}
 
@@ -182,9 +203,6 @@ func (g *Game) drawTypography(screen *ebiten.Image) {
 		y := (ScreenHeight+h)/2 + jitter
 
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(float64(x), float64(y))
-
-		// Scale (Shaft Pulse)
 		op.GeoM.Translate(float64(-x), float64(-y)) // Center for scaling
 		op.GeoM.Scale(sizeScale, sizeScale)
 		op.GeoM.Translate(float64(x), float64(y)) // Move back
@@ -235,14 +253,28 @@ func (g *Game) connect() {
 
 func (g *Game) handleMessage(msg []byte) {
 	var data map[string]interface{}
-	json.Unmarshal(msg, &data)
-	if data["type"] == "flash" {
+	if err := json.Unmarshal(msg, &data); err != nil {
+		log.Printf("Error unmarshaling message: %v", err)
+		return
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if msgType, ok := data["type"].(string); ok && msgType == "flash" {
 		if word, ok := data["word"].(string); ok {
 			g.flashWord = word
 			g.flashTTL = 60
 		}
 	} else {
-		json.Unmarshal(msg, &g.state)
+		// Assume it's a full state update if not a "flash" message
+		// This will overwrite the entire g.state struct
+		var newState State
+		if err := json.Unmarshal(msg, &newState); err != nil {
+			log.Printf("Error unmarshaling state message: %v", err)
+			return
+		}
+		g.state = newState
 	}
 }
 

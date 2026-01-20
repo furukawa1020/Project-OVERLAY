@@ -4,4 +4,6 @@ gem 'sinatra'
 gem 'faye-websocket'
 gem 'puma'
 gem 'json'
-gem 'thin' # Alternative server if puma has issues with windows/websocket
+gem 'thin'
+gem 'rqrcode'
+gem 'rackup' # Alternative server if puma has issues with windows/websocket

@@ -1,9 +1,10 @@
+require 'sinatra'
 require 'rqrcode'
 require 'socket'
 require_relative 'state_manager'
 require_relative 'config'
 
-set :server, 'thin'
+set :server, 'puma'
 set :bind, '0.0.0.0'
 set :port, 4567
 
