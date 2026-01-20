@@ -1,6 +1,7 @@
 require 'sinatra'
 require 'rqrcode'
 require 'faye/websocket'
+Faye::WebSocket.load_adapter('thin')
 require_relative 'state_manager'
 require_relative 'config'
 
