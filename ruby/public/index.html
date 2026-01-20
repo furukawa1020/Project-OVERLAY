@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OVERLAY Participant</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #eee; }
+        .btn { display: block; width: 100%; padding: 20px; margin: 10px 0; font-size: 24px; border: none; border-radius: 8px; cursor: pointer; }
+        .btn-ok { background: #4CAF50; color: white; }
+        .btn-unsure { background: #FFC107; color: black; }
+        .btn-no { background: #F44336; color: white; }
+        #status { margin-top: 20px; font-weight: bold; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>OVERLAY</h1>
+    <p>あなたの状態を選択してください</p>
+    
+    <button class="btn btn-ok" onclick="vote('ok')">OK (進んで良い)</button>
+    <button class="btn btn-unsure" onclick="vote('unsure')">? (怪しい)</button>
+    <button class="btn btn-no" onclick="vote('no')">NO (止めて)</button>
+
+    <div id="status">Connecting...</div>
+
+    <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/cable`);
+
+        ws.onopen = () => {
+            document.getElementById('status').innerText = 'Connected';
+        };
+
+        ws.onmessage = (event) => {
+            console.log('State update:', JSON.parse(event.data));
+        };
+
+        ws.onclose = () => {
+            document.getElementById('status').innerText = 'Disconnected';
+        };
+
+        function vote(type) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'vote', vote: type }));
+            }
+        }
+    </script>
+</body>
+</html>
