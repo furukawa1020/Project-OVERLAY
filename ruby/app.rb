@@ -3,6 +3,7 @@ require 'faye/websocket'
 require 'json'
 
 require_relative 'state_manager'
+require_relative 'config'
 
 set :server, 'thin'
 set :bind, '0.0.0.0'
@@ -17,6 +18,17 @@ end
 
 get '/admin' do
   File.read(File.join('public', 'admin.html'))
+end
+
+get '/config' do
+  content_type :json
+  {
+    words: Config::DANGER_WORDS,
+    thresholds: {
+      no: Config::THRESHOLD_NO,
+      split: Config::THRESHOLD_SPLIT
+    }
+  }.to_json
 end
 
 get '/cable' do
@@ -36,6 +48,10 @@ get '/cable' do
       when 'vote'
         $manager.add_vote(data['vote'])
         broadcast_state
+      when 'flash_word'
+        # 参加者が危険ワードを押した場合
+        # 現状は即座にFlashさせる（要件によっては投票制にするが、露出重視なら即時で良い）
+        broadcast_flash(data['word'])
       when 'admin'
         handle_admin_command(data)
       end
@@ -58,10 +74,13 @@ def handle_admin_command(data)
     $manager.reset
     broadcast_state
   when 'flash'
-    # Broadcast flash event directly to clients (Go renderer)
-    msg = { type: 'flash', word: data['word'], ttl: 1000 }.to_json
-    $clients.each { |ws| ws.send(msg) }
+    broadcast_flash(data['word'])
   end
+end
+
+def broadcast_flash(word)
+  msg = { type: 'flash', word: word, ttl: 1000 }.to_json
+  $clients.each { |ws| ws.send(msg) }
 end
 
 def broadcast_state

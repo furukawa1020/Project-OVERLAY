@@ -1,8 +1,5 @@
 class StateManager
-  # Configuration
-  WINDOW_SEC = 10
-  THRESHOLD_NO = 0.2
-  THRESHOLD_SPLIT = 0.3
+  # Configuration imported from config.rb
   
   def initialize
     @votes = [] # [{type: 'ok', ts: Time.now}, ...]
@@ -39,7 +36,7 @@ class StateManager
 
   def cleanup_old_votes
     now = Time.now
-    @votes.reject! { |v| now - v[:ts] > WINDOW_SEC }
+    @votes.reject! { |v| now - v[:ts] > Config::VOTE_WINDOW_SEC }
   end
 
   def recalculate
@@ -67,7 +64,7 @@ class StateManager
 
     @strength = [total / 5.0, 1.0].min # Cap strength at 5 votes for now
 
-    if disagreement > THRESHOLD_SPLIT
+    if disagreement > Config::THRESHOLD_SPLIT
       @current_state = 'SPLIT'
       @split_degree = [disagreement * 1.5, 1.0].min # Amplify split visual
     elsif total > 0

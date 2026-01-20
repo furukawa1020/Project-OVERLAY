@@ -1,25 +1,120 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OVERLAY Participant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OVERLAY</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #eee; }
-        .btn { display: block; width: 100%; padding: 20px; margin: 10px 0; font-size: 24px; border: none; border-radius: 8px; cursor: pointer; }
-        .btn-ok { background: #4CAF50; color: white; }
-        .btn-unsure { background: #FFC107; color: black; }
-        .btn-no { background: #F44336; color: white; }
-        #status { margin-top: 20px; font-weight: bold; color: #666; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #eee;
+            touch-action: manipulation;
+        }
+
+        h1 {
+            font-size: 1.2rem;
+            color: #888;
+            font-weight: normal;
+            margin-bottom: 2rem;
+        }
+
+        .main-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 25px 0;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            color: white;
+            opacity: 0.9;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+            opacity: 1;
+        }
+
+        .btn-ok {
+            background: #2e7d32;
+        }
+
+        .btn-unsure {
+            background: #f9a825;
+            color: #000;
+        }
+
+        .btn-no {
+            background: #c62828;
+        }
+
+        .danger-zone {
+            margin-top: 40px;
+            border-top: 1px solid #444;
+            padding-top: 20px;
+        }
+
+        .danger-label {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .word-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .btn-word {
+            background: #424242;
+            padding: 15px 0;
+            font-size: 1rem;
+            border-radius: 8px;
+        }
+
+        .btn-word:active {
+            background: #d32f2f;
+            color: white;
+        }
+
+        #status {
+            margin-top: 30px;
+            font-size: 0.8rem;
+            color: #555;
+        }
     </style>
 </head>
+
 <body>
     <h1>OVERLAY</h1>
-    <p>あなたの状態を選択してください</p>
-    
-    <button class="btn btn-ok" onclick="vote('ok')">OK (進んで良い)</button>
-    <button class="btn btn-unsure" onclick="vote('unsure')">? (怪しい)</button>
-    <button class="btn btn-no" onclick="vote('no')">NO (止めて)</button>
+
+    <div class="main-controls">
+        <button class="btn btn-ok" onclick="vote('ok')">OK</button>
+        <button class="btn btn-unsure" onclick="vote('unsure')">?</button>
+        <button class="btn btn-no" onclick="vote('no')">NO</button>
+    </div>
+
+    <div class="danger-zone">
+        <span class="danger-label">気になる言葉・空気</span>
+        <div id="word-grid" class="word-grid">
+            <!-- Loaded dynamically -->
+        </div>
+    </div>
 
     <div id="status">Connecting...</div>
 
@@ -27,12 +122,22 @@
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const ws = new WebSocket(`${protocol}//${window.location.host}/cable`);
 
+        // Init
+        fetch('/config')
+            .then(r => r.json())
+            .then(config => {
+                const grid = document.getElementById('word-grid');
+                config.words.forEach(word => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-word';
+                    btn.innerText = word;
+                    btn.onclick = () => triggerWord(word);
+                    grid.appendChild(btn);
+                });
+            });
+
         ws.onopen = () => {
             document.getElementById('status').innerText = 'Connected';
-        };
-
-        ws.onmessage = (event) => {
-            console.log('State update:', JSON.parse(event.data));
         };
 
         ws.onclose = () => {
@@ -42,8 +147,18 @@
         function vote(type) {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'vote', vote: type }));
+                navigator.vibrate?.(50); // Feedback
+            }
+        }
+
+        function triggerWord(word) {
+            if (ws.readyState === WebSocket.OPEN) {
+                // Send as flash_word event
+                ws.send(JSON.stringify({ type: 'flash_word', word: word }));
+                navigator.vibrate?.([50, 50, 50]);
             }
         }
     </script>
 </body>
+
 </html>
