@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"sync"
@@ -65,6 +66,10 @@ type Game struct {
 	// 	flashWord   string
 	// 	flashTTL    int
 	barrage []BarrageWord
+
+	// Synesthetic state
+	bgColor       color.RGBA
+	targetBgColor color.RGBA
 }
 
 type BarrageWord struct {
@@ -113,14 +118,77 @@ func (g *Game) Update() error {
 	}
 	g.barrage = newBarrage
 
+	// Color Interpolation (Lerp)
+	// If SPLIT, force Red
+	if g.state.CurrentState == "SPLIT" {
+		g.targetBgColor = ColRed
+	}
+
+	// Lerp towards target
+	g.bgColor = lerpColor(g.bgColor, g.targetBgColor, 0.05)
+
 	g.mu.Unlock()
 
 	return nil
 }
 
+func lerpColor(c1, c2 color.RGBA, t float64) color.RGBA {
+	return color.RGBA{
+		R: uint8(float64(c1.R) + float64(int(c2.R)-int(c1.R))*t),
+		G: uint8(float64(c1.G) + float64(int(c2.G)-int(c1.G))*t),
+		B: uint8(float64(c1.B) + float64(int(c2.B)-int(c1.B))*t),
+		A: 255,
+	}
+}
+
+func textToColor(text string) color.RGBA {
+	hash := 0
+	for _, c := range text {
+		hash = int(c) + ((hash << 5) - hash)
+	}
+
+	// Generate HSV-ish (High Saturation/Value for Shaft look)
+	h := math.Abs(float64(hash % 360))
+	s := 0.8
+	v := 0.2 // Dark background usually, but let's try 0.2 for colored darks
+
+	// Quick HSV to RGB
+	c := v * s
+	x := c * (1 - math.Abs(math.Mod(h/60.0, 2)-1))
+	m := v - c
+
+	var r, g, b float64
+	switch {
+	case 0 <= h && h < 60:
+		r, g, b = c, x, 0
+	case 60 <= h && h < 120:
+		r, g, b = x, c, 0
+	case 120 <= h && h < 180:
+		r, g, b = 0, c, x
+	case 180 <= h && h < 240:
+		r, g, b = 0, x, c
+	case 240 <= h && h < 300:
+		r, g, b = x, 0, c
+	case 300 <= h && h < 360:
+		r, g, b = c, 0, x
+	}
+
+	return color.RGBA{
+		R: uint8((r + m) * 255),
+		G: uint8((g + m) * 255),
+		B: uint8((b + m) * 255),
+		A: 255,
+	}
+}
+
 func (g *Game) spawnWord(text string, glitch bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+
+	// Update Target Background based on text
+	if !glitch && g.state.CurrentState != "SPLIT" {
+		g.targetBgColor = textToColor(text)
+	}
 
 	scale := 1.0 + rand.Float64()
 	if glitch {
@@ -159,16 +227,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.mu.RUnlock()
 
 	// Shaft Style Background Logic
-	// SPLIT -> Red Background, Black Text (High Alert)
-	// ALIGNED -> White Background, Black Text (Clarity)
-	// UNKNOWN -> Black Background, White Text (Mystery)
+	// SPLIT -> Red Background (Handled in Update via targetBgColor override)
+	// ALIGNED -> Dynamic Synesthetic Color (Handled in Update)
 
-	bgColor := ColBlack
-	if currentState == "SPLIT" {
-		bgColor = ColRed
-		// Strobe effect on critical split
-	}
-	screen.Fill(bgColor)
+	// screen.Fill(g.bgColor) // Direct fill
+
+	// Let's use a "Vignette" or simple fill for now
+	screen.Fill(g.bgColor)
 
 	// 1. Dynamic Background Geometry (Reacts to Audio)
 	g.drawGeometry(screen)
@@ -391,7 +456,9 @@ func loadFont(size float64) font.Face {
 
 func main() {
 	game := &Game{
-		audioChan: make(chan float64, 10), // Initialize game's audioChan
+		audioChan:     make(chan float64, 10),
+		bgColor:       ColBlack,
+		targetBgColor: ColBlack,
 	}
 	game.jpFace = loadFont(64)     // Standard Text
 	game.jpFaceBig = loadFont(200) // Huge Impact Text
@@ -412,7 +479,7 @@ func main() {
 				case txt := <-se.TextChan:
 					fmt.Printf("RECOGNIZED: %s\n", txt)
 
-					// 1. Send to Ruby (The Brain)
+					// 1. Send to Ruby (If connected)
 					if game.conn != nil {
 						msg := map[string]string{
 							"type": "speech_text",
@@ -421,9 +488,38 @@ func main() {
 						game.conn.WriteJSON(msg)
 					}
 
-					// 2. Trigger Visuals (The Body)
-					// Glitch if confidence low (simulated by short words for now) or random
-					isGlitch := len(txt) < 3 // Short words might be noise?
+					// 2. Local Atmosphere Logic (Fallback)
+					dangerWords := []string{"嘘", "矛盾", "違う", "だめ", "無理", "変", "おかしい", "バグ", "ミス", "否定", "NO", "嫌", "怖い"}
+					isDanger := false
+					for _, dw := range dangerWords {
+						if strings.Contains(txt, dw) {
+							isDanger = true
+							break
+						}
+					}
+
+					isGlitch := len(txt) < 3
+
+					if isDanger {
+						game.mu.Lock()
+						game.state.CurrentState = "SPLIT"
+						game.mu.Unlock()
+						// Reset after 3 seconds?
+						// ideally use a timer in Update(), but for now just let it stick or decay.
+						// Let's launch a decay timer goroutine
+						go func() {
+							time.Sleep(2 * time.Second)
+							game.mu.Lock()
+							game.state.CurrentState = "UNKNOWN" // Revert to neutral
+							game.mu.Unlock()
+						}()
+						isGlitch = true // Danger words always glitch
+					} else {
+						// Green/White interaction usually implies alignment, but we default to UNKNOWN
+						// If user says positive things?
+						// For now, default is just spawning words.
+					}
+
 					game.spawnWord(txt, isGlitch)
 				}
 			}
