@@ -24,6 +24,7 @@ func NewSpeechEngine() *SpeechEngine {
 	// Suppress Vosk logs
 	vosk.SetLogLevel(-1)
 
+	// LOAD SMALL MODEL (Temporary for testing while Big downloads)
 	model, err := vosk.NewModel("vosk/model")
 	if err != nil {
 		log.Println("Vosk Model Error:", err)

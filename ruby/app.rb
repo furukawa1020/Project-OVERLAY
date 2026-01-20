@@ -1,6 +1,7 @@
 require 'sinatra'
 require 'rqrcode'
-require 'socket'
+require 'faye/websocket'
+Faye::WebSocket.load_adapter('puma')
 require_relative 'state_manager'
 require_relative 'config'
 
@@ -60,8 +61,13 @@ get '/cable' do
       data = JSON.parse(event.data) rescue {}
       
       case data['type']
+      when 'speech_text'
+        # Goからの音声認識テキストを受信
+        $manager.process_text(data['text'])
+        broadcast_state
       when 'vote'
-        $manager.add_vote(data['vote'])
+        # Legacy/Mobile input (Keep only for manual override if needed)
+        # $manager.add_vote(data['vote']) 
         broadcast_state
       when 'flash_word'
         # 参加者が危険ワードを押した場合

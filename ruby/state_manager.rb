@@ -8,12 +8,26 @@ class StateManager
     @strength = 0.0
   end
 
-  def add_vote(type)
-    return unless ['ok', 'unsure', 'no'].include?(type)
-    @votes << { type: type, ts: Time.now }
-    cleanup_old_votes
+  def initialize
+    @current_state = 'UNKNOWN'
+    @tension = 0.0 # 0.0 to 10.0 (Atmosphere Heat)
+    @last_update = Time.now
+  end
+
+  def process_text(text)
+    # Check for Danger Words
+    hit = Config::DANGER_WORDS.any? { |w| text.include?(w) }
+    
+    if hit
+      @tension += 3.0 # Spike tension
+    else
+      @tension += 0.2 # Slight activity boost
+    end
+    
     recalculate
   end
+  
+  # Deprecated: add_vote is removed
 
   def reset
     @votes = []
@@ -26,9 +40,8 @@ class StateManager
     recalculate 
     {
       state: @current_state,
-      split_degree: @split_degree,
-      strength: @strength,
-      vote_count: @votes.size
+      tension: @tension,
+      split_degree: (@tension / 10.0).clamp(0.0, 1.0), # Map tension to split visual
     }
   end
 
@@ -40,39 +53,21 @@ class StateManager
   end
 
   def recalculate
-    if @votes.empty?
-      @current_state = 'UNKNOWN'
-      @split_degree = 0.0
-      @strength = 0.0
-      return
-    end
+    now = Time.now
+    dt = now - @last_update
+    @last_update = now
 
-    total = @votes.size.to_f
-    counts = @votes.group_by { |v| v[:type] }.transform_values(&:size)
-    
-    ok_count = counts['ok'] || 0
-    no_count = counts['no'] || 0
-    unsure_count = counts['unsure'] || 0
+    # Natural Decay (Cooling down)
+    @tension -= dt * 0.5
+    @tension = 0.0 if @tension < 0
 
-    ok_ratio = ok_count / total
-    no_ratio = no_count / total
-    unsure_ratio = unsure_count / total
-    
-    # Split measures disagreement (NO + UNSURE)
-    # Or strictly: Variance? For now usage simple ratio logic
-    disagreement = no_ratio + (unsure_ratio * 0.5)
-
-    @strength = [total / 5.0, 1.0].min # Cap strength at 5 votes for now
-
-    if disagreement > Config::THRESHOLD_SPLIT
-      @current_state = 'SPLIT'
-      @split_degree = [disagreement * 1.5, 1.0].min # Amplify split visual
-    elsif total > 0
-      @current_state = 'ALIGNED'
-      @split_degree = 0.0
+    # Tension Thresholds
+    if @tension > 8.0
+      @current_state = 'SPLIT' # Chaos/Conflict
+    elsif @tension > 2.0
+      @current_state = 'ALIGNED' # Active Conversation
     else
-      @current_state = 'UNKNOWN'
-      @split_degree = 0.0
+      @current_state = 'UNKNOWN' # Silence
     end
   end
 end

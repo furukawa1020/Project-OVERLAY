@@ -62,8 +62,20 @@ type Game struct {
 	frameCount  int
 	videoGlitch float64 // For Shaft cut effect
 	words       []string
-	flashWord   string
-	flashTTL    int
+	// 	flashWord   string
+	// 	flashTTL    int
+	barrage []BarrageWord
+}
+
+type BarrageWord struct {
+	Text     string
+	X, Y     float64
+	VX, VY   float64
+	Scale    float64
+	Color    color.Color
+	Life     int
+	MaxLife  int
+	IsGlitch bool
 }
 
 func (g *Game) Update() error {
@@ -89,16 +101,55 @@ func (g *Game) Update() error {
 		g.micVolume *= 0.95
 	}
 
-	// Flash TTL
-	if g.flashTTL > 0 {
-		g.flashTTL--
-		if g.flashTTL == 0 {
-			g.flashWord = ""
+	// Update Barrage
+	newBarrage := []BarrageWord{}
+	for _, b := range g.barrage {
+		b.X += b.VX
+		b.Y += b.VY
+		b.Life--
+		if b.Life > 0 {
+			newBarrage = append(newBarrage, b)
 		}
 	}
+	g.barrage = newBarrage
+
 	g.mu.Unlock()
 
 	return nil
+}
+
+func (g *Game) spawnWord(text string, glitch bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	scale := 1.0 + rand.Float64()
+	if glitch {
+		scale *= 1.5
+	}
+
+	// Start from random side or center? Barrage usually flows right to left or random.
+	// Let's do "Eruption" style from center-ish for conversation.
+
+	bw := BarrageWord{
+		Text:     text,
+		X:        float64(ScreenWidth/2) + rand.Float64()*400 - 200,
+		Y:        float64(ScreenHeight/2) + rand.Float64()*200 - 100,
+		VX:       (rand.Float64() - 0.5) * 5,
+		VY:       (rand.Float64() - 0.5) * 5,
+		Scale:    scale,
+		Color:    ColWhite,
+		Life:     180 + rand.Intn(60), // 3-4 seconds
+		MaxLife:  200,
+		IsGlitch: glitch,
+	}
+
+	if g.state.CurrentState == "SPLIT" || glitch {
+		bw.Color = ColRed
+		bw.VX *= 2.0
+		bw.VY *= 2.0
+	}
+
+	g.barrage = append(g.barrage, bw)
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
@@ -123,7 +174,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawGeometry(screen)
 
 	// 2. Typography (The "Conversation")
-	g.drawTypography(screen)
+	g.drawBarrage(screen)
 
 	// Debug info
 	ebitenutil.DebugPrint(screen, fmt.Sprintf("Vol: %.2f | State: %s", vol, currentState))
@@ -159,58 +210,45 @@ func (g *Game) drawGeometry(screen *ebiten.Image) {
 	vector.StrokeLine(screen, x1, y1, x2, y2, thickness, col, true)
 }
 
-func (g *Game) drawTypography(screen *ebiten.Image) {
-	// "Word Flash" - The core feature
-	// If mic volume spikes, show random decorations or the "Flash Word"
-
-	// Priority: Flash Word from Ruby > Audio Reactive Noise
-
+func (g *Game) drawBarrage(screen *ebiten.Image) {
 	g.mu.RLock()
-	flashWord := g.flashWord
-	micVolume := g.micVolume
-	currentState := g.state.CurrentState
+	words := make([]BarrageWord, len(g.barrage))
+	copy(words, g.barrage)
+	// currentState := g.state.CurrentState
 	g.mu.RUnlock()
 
-	var textToDraw string
-	var sizeScale float64 = 1.0
-	var clr color.Color = ColWhite
-
-	if flashWord != "" {
-		textToDraw = flashWord
-		sizeScale = 2.0
-		clr = ColRed
-	} else if micVolume > 0.1 && g.frameCount%20 == 0 {
-		// Simulated conversational noise (if we had STT, this would be real words)
-		// For now, use abstract symbols or Kanat
-		opts := []string{"認識", "齟齬", "継続", "停止", "？", "..."}
-		textToDraw = opts[rand.Intn(len(opts))]
-		sizeScale = 0.5 + micVolume
-		clr = ColYellow
+	if g.jpFaceBig == nil {
+		return
 	}
 
-	if textToDraw != "" && g.jpFaceBig != nil {
-		bounds := text.BoundString(g.jpFaceBig, textToDraw)
+	for _, b := range words {
+		bounds := text.BoundString(g.jpFaceBig, b.Text)
 		w, h := bounds.Max.X-bounds.Min.X, bounds.Max.Y-bounds.Min.Y
 
-		// Randomize position slightly for "Unease"
-		jitter := 0
-		if currentState == "SPLIT" {
-			jitter = rand.Intn(50) - 25
+		// Glitch Effect: Random Jitter
+		jx, jy := 0.0, 0.0
+		if b.IsGlitch || g.state.CurrentState == "SPLIT" {
+			jx = (rand.Float64() - 0.5) * 10
+			jy = (rand.Float64() - 0.5) * 10
 		}
 
-		// Center
-		x := (ScreenWidth-w)/2 + jitter
-		y := (ScreenHeight+h)/2 + jitter
-
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(float64(-x), float64(-y)) // Center for scaling
-		op.GeoM.Scale(sizeScale, sizeScale)
-		op.GeoM.Translate(float64(x), float64(y)) // Move back
-
-		// Tilt (Shaft Head Tilt)
+		op.GeoM.Translate(float64(-w/2), float64(-h/2))
+		op.GeoM.Scale(b.Scale, b.Scale)
 		op.GeoM.Rotate(0.1 * math.Sin(float64(g.frameCount)*0.05))
+		op.GeoM.Translate(b.X+jx, b.Y+jy)
 
-		text.Draw(screen, textToDraw, g.jpFaceBig, x, y, clr)
+		// Alpha decay
+		alpha := float64(b.Life) / float64(b.MaxLife)
+		if alpha < 0.2 {
+			alpha = 0.2
+		}
+
+		// Ebiten doesn't support direct alpha on text easily without shaders or color M,
+		// but we can use ColorScale in newer versions or just stick to solid for Shaft style.
+		// Shaft style is solid, so keep it solid.
+
+		text.Draw(screen, b.Text, g.jpFaceBig, int(b.X+jx), int(b.Y+jy), b.Color)
 	}
 }
 
@@ -263,8 +301,26 @@ func (g *Game) handleMessage(msg []byte) {
 
 	if msgType, ok := data["type"].(string); ok && msgType == "flash" {
 		if word, ok := data["word"].(string); ok {
-			g.flashWord = word
-			g.flashTTL = 60
+			// Manual trigger via Admin spawning a glitch word
+			// We need to unlock to call spawnWord because spawnWord locks.
+			// Ideally refactor spawnWord to internalSpawnWord without lock.
+			// For now, let's just do logic inline since we are locked.
+
+			// DUPLICATE LOGIC FROM spawnWord but inline to avoid deadlock
+			scale := 2.0
+			bw := BarrageWord{
+				Text:     word,
+				X:        float64(ScreenWidth/2) + rand.Float64()*100 - 50,
+				Y:        float64(ScreenHeight/2) + rand.Float64()*100 - 50,
+				VX:       (rand.Float64() - 0.5) * 10,
+				VY:       (rand.Float64() - 0.5) * 10,
+				Scale:    scale,
+				Color:    ColRed,
+				Life:     300,
+				MaxLife:  300,
+				IsGlitch: true,
+			}
+			g.barrage = append(g.barrage, bw)
 		}
 	} else {
 		// Assume it's a full state update if not a "flash" message
@@ -354,16 +410,21 @@ func main() {
 				case vol := <-se.VolChan:
 					game.audioChan <- vol
 				case txt := <-se.TextChan:
-					// Received recognized text!
-					// Force flash this word
 					fmt.Printf("RECOGNIZED: %s\n", txt)
 
-					// Trigger standard "Flash" logic
-					// Since this is a game loop, we should guard access or just set it
-					// This runs in background, Game.Draw/Update runs in main thread.
-					// Simple mutex or just atomic assignment string is mostly safe in Go for visualization
-					game.flashWord = txt
-					game.flashTTL = 120 // 2 seconds display for recognized text
+					// 1. Send to Ruby (The Brain)
+					if game.conn != nil {
+						msg := map[string]string{
+							"type": "speech_text",
+							"text": txt,
+						}
+						game.conn.WriteJSON(msg)
+					}
+
+					// 2. Trigger Visuals (The Body)
+					// Glitch if confidence low (simulated by short words for now) or random
+					isGlitch := len(txt) < 3 // Short words might be noise?
+					game.spawnWord(txt, isGlitch)
 				}
 			}
 		}()
