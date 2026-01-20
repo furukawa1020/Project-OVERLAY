@@ -4,20 +4,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"io/ioutil"
 	"log"
 	"net/url"
 
 	"github.com/gorilla/websocket"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
 )
 
 // Config
 const (
 	ScreenWidth  = 1920
 	ScreenHeight = 1080
-	ServerHost   = "localhost:4567" // Ruby server
+	ServerHost   = "localhost:4567"
 )
 
 // State from Server
@@ -25,21 +29,30 @@ type State struct {
 	CurrentState string  `json:"state"` // ALIGNED, SPLIT, UNKNOWN
 	SplitDegree  float64 `json:"split_degree"`
 	Strength     float64 `json:"strength"`
-	FlashWord    string  `json:"word,omitempty"` // From 'flash' event
+	FlashWord    string  `json:"word,omitempty"`
 }
 
-// Game implements ebiten.Game interface.
 type Game struct {
-	conn      *websocket.Conn
-	state     State
-	flashWord string
-	flashTTL  int
+	conn         *websocket.Conn
+	targetState  State // Serverからの最新
+	currentState State // 描画用の現在値（補間用）
+
+	flashWord    string
+	flashTTL     int     // Max 60
+	flashOpacity float64 // 1.0 -> 0.0
+
+	jpFace font.Face
 }
 
 func (g *Game) Update() error {
-	// Decrease Flash TTL
+	// State Interpolation (Smooth transition)
+	// SplitDegreeを滑らかに追従させる
+	g.currentState.SplitDegree = lerp(g.currentState.SplitDegree, g.targetState.SplitDegree, 0.05)
+
+	// Flash Logic
 	if g.flashTTL > 0 {
 		g.flashTTL--
+		g.flashOpacity = float64(g.flashTTL) / 60.0
 		if g.flashTTL == 0 {
 			g.flashWord = ""
 		}
@@ -47,50 +60,68 @@ func (g *Game) Update() error {
 	return nil
 }
 
+func lerp(current, target, rate float64) float64 {
+	return current + (target-current)*rate
+}
+
 func (g *Game) Draw(screen *ebiten.Image) {
-	// 1. Clear Screen (Black)
 	screen.Fill(color.Black)
-
-	// 2. Draw Floor (Line)
 	g.drawFloor(screen)
-
-	// 3. Draw Wall (Flash Word)
 	g.drawWall(screen)
-	
-	// Debug Info
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("State: %s\nSplit: %.2f", g.state.CurrentState, g.state.SplitDegree))
+
+	// Debug
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("State: %s\nSplit: %.3f", g.targetState.CurrentState, g.currentState.SplitDegree))
 }
 
 func (g *Game) drawFloor(screen *ebiten.Image) {
 	cx, cy := float32(ScreenWidth/2), float32(ScreenHeight/2)
-	lineColor := color.RGBA{200, 200, 200, 255}
-	thickness := float32(4.0)
+	baseColor := color.RGBA{220, 220, 220, 255}
 
-	switch g.state.CurrentState {
-	case "SPLIT":
-		// Branching Y-shape
-		degree := float32(g.state.SplitDegree) * 100 // Visual spread
-		vector.StrokeLine(screen, cx, cy+400, cx, cy, thickness, lineColor, false)
-		vector.StrokeLine(screen, cx, cy, cx-degree*2, cy-200, thickness, lineColor, false)
-		vector.StrokeLine(screen, cx, cy, cx+degree*2, cy-200, thickness, lineColor, false)
-	case "UNKNOWN":
-		// Thin dotted line (simulated by alpha)
-		col := color.RGBA{100, 100, 100, 100}
-		vector.StrokeLine(screen, cx, cy+400, cx, cy-400, 2, col, false)
-	default: // ALIGNED
-		// Straight Line
-		vector.StrokeLine(screen, cx, cy+400, cx, cy-400, thickness, lineColor, false)
+	// 状態に応じた線の表現
+	// SplitDegreeが大きいほど、Y字が広がる
+
+	thickness := float32(6.0)
+	spread := float32(g.currentState.SplitDegree) * 600.0 // 最大600px広がる
+
+	// Root line (手前から中心へ)
+	vector.StrokeLine(screen, cx, float32(ScreenHeight), cx, cy, thickness, baseColor, true)
+
+	// Branches
+	// 左分岐
+	vector.StrokeLine(screen, cx, cy, cx-spread, cy-400, thickness, baseColor, true)
+	// 右分岐
+	vector.StrokeLine(screen, cx, cy, cx+spread, cy-400, thickness, baseColor, true)
+
+	// 中央線（ALIGNED維持なら強く表示、SPLITなら薄くなる）
+	centerAlpha := uint8(255 * (1.0 - g.currentState.SplitDegree))
+	if centerAlpha > 0 {
+		centerColor := color.RGBA{220, 220, 220, centerAlpha}
+		vector.StrokeLine(screen, cx, cy, cx, cy-400, thickness, centerColor, true)
 	}
 }
 
 func (g *Game) drawWall(screen *ebiten.Image) {
-	if g.flashWord != "" {
-		// Simple text drawing (Debug print for now, needs proper font later)
+	if g.flashWord != "" && g.jpFace != nil {
+		// Calculate position to center text
+		bounds := text.BoundString(g.jpFace, g.flashWord)
+		textWidth := bounds.Max.X - bounds.Min.X
+		textHeight := bounds.Max.Y - bounds.Min.Y
+
+		x := (ScreenWidth - textWidth) / 2
+		y := (ScreenHeight + textHeight) / 2
+
+		// Opacity color
+		alpha := uint8(255 * g.flashOpacity)
+		c := color.RGBA{255, 50, 50, alpha} // Red flash for danger words
+
+		text.Draw(screen, g.flashWord, g.jpFace, x, y, c)
+	} else if g.flashWord != "" {
+		// Fallback if no font
 		ebitenutil.DebugPrintAt(screen, g.flashWord, ScreenWidth/2, ScreenHeight/2)
 	}
 }
 
-func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+func (g *Game) Layout(w, h int) (int, int) {
 	return ScreenWidth, ScreenHeight
 }
 
@@ -105,7 +136,6 @@ func (g *Game) connect() {
 	}
 	g.conn = c
 
-	// Listen loop
 	go func() {
 		defer c.Close()
 		for {
@@ -128,21 +158,63 @@ func (g *Game) handleMessage(msg []byte) {
 	if data["type"] == "flash" {
 		if word, ok := data["word"].(string); ok {
 			g.flashWord = word
-			g.flashTTL = 60 // ~1 sec at 60fps
+			g.flashTTL = 90 // 1.5 sec
 		}
 	} else {
-		// Assume State update
-		// (Simple re-unmarshal to struct for convenience, though inefficient)
-		json.Unmarshal(msg, &g.state)
+		json.Unmarshal(msg, &g.targetState)
 	}
+}
+
+func loadFont() font.Face {
+	// 簡易的にWindowsのメイリオなどを読み込むトライ
+	// 本番ではアセットディレクトリに同梱推奨
+	fontPaths := []string{
+		"C:\\Windows\\Fonts\\meiryo.ttc",
+		"C:\\Windows\\Fonts\\msgothic.ttc",
+	}
+
+	var fontData []byte
+	var err error
+
+	for _, path := range fontPaths {
+		fontData, err = ioutil.ReadFile(path)
+		if err == nil {
+			break
+		}
+	}
+
+	if len(fontData) == 0 {
+		log.Println("No Japanese font found.")
+		return nil
+	}
+
+	tt, err := opentype.Parse(fontData)
+	if err != nil {
+		log.Println("Parse font error:", err)
+		return nil
+	}
+
+	face, err := opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    128, // Large text
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		log.Println("NewFace error:", err)
+		return nil
+	}
+	return face
 }
 
 func main() {
 	game := &Game{}
+	game.jpFace = loadFont()
 	game.connect()
 
 	ebiten.SetWindowSize(ScreenWidth/2, ScreenHeight/2)
-	ebiten.SetWindowTitle("OVERLAY Renderer")
+	ebiten.SetWindowTitle("OVERLAY Spatial Renderer")
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
