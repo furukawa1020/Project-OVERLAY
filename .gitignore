@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Ruby
+vendor/bundle/
+.bundle/
+
+# Go
+go/vosk/
+*.dll
+*.zip
+*.exe
+go/assets/fonts/
+
+# Editor
+.vscode/

@@ -1,7 +1,5 @@
-require 'sinatra'
-require 'faye/websocket'
-require 'json'
-
+require 'rqrcode'
+require 'socket'
 require_relative 'state_manager'
 require_relative 'config'
 
@@ -18,6 +16,22 @@ end
 
 get '/admin' do
   File.read(File.join('public', 'admin.html'))
+end
+
+get '/connect' do
+  # Get Local IP
+  ip = Socket.ip_address_list.detect(&:ipv4_private?)&.ip_address || "localhost"
+  url = "http://#{ip}:#{settings.port}"
+  
+  qrcode = RQRCode::QRCode.new(url)
+  qr_svg = qrcode.as_svg(
+    color: "000",
+    shape_rendering: "crispEdges",
+    module_size: 11,
+    standalone: true
+  )
+  
+  erb :connect, views: 'public', locals: { qr_svg: qr_svg, url: url }
 end
 
 get '/config' do
