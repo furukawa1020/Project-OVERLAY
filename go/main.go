@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
 	"net/url"
+	"os"
 	"time"
 
 	"sync"
@@ -279,29 +279,55 @@ func (g *Game) handleMessage(msg []byte) {
 }
 
 func loadFont(size float64) font.Face {
-	// Try system fonts
+	// Try local asset first (Reliable)
 	fontPaths := []string{
+		"assets/font.otf",
 		"C:\\Windows\\Fonts\\meiryo.ttc",
-		"C:\\Windows\\Fonts\\msgothic.ttc",
 	}
+
 	var fontData []byte
 	var err error
+	var pathUsed string
+
 	for _, path := range fontPaths {
-		fontData, err = ioutil.ReadFile(path)
+		fontData, err = os.ReadFile(path)
 		if err == nil {
+			pathUsed = path
 			break
 		}
 	}
 	if len(fontData) == 0 {
+		log.Println("WARNING: No font found. Falling back to nil (Will Crash if used)")
 		return nil
 	}
 
-	tt, _ := opentype.Parse(fontData)
-	face, _ := opentype.NewFace(tt, &opentype.FaceOptions{
+	// Parse
+	tt, err := opentype.Parse(fontData)
+	if err != nil {
+		// If TTC, try collection
+		if len(pathUsed) > 3 && pathUsed[len(pathUsed)-3:] == "ttc" {
+			coll, err := opentype.ParseCollection(fontData)
+			if err == nil && coll.NumFonts() > 0 {
+				tt, _ = coll.Font(0) // Use first font
+			}
+		}
+	}
+
+	if tt == nil {
+		log.Printf("Failed to parse font from %s: %v", pathUsed, err)
+		return nil
+	}
+
+	face, err := opentype.NewFace(tt, &opentype.FaceOptions{
 		Size:    size,
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
+	if err != nil {
+		log.Printf("Failed to create face: %v", err)
+		return nil
+	}
+
 	return face
 }
 
