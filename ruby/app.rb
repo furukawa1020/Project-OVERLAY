@@ -2,17 +2,14 @@ require 'sinatra'
 require 'faye/websocket'
 require 'json'
 
+require_relative 'state_manager'
+
 set :server, 'thin'
 set :bind, '0.0.0.0'
 set :port, 4567
 
-# Global State (In-Memory for now)
-$state = {
-  current: 'UNKNOWN', # ALIGNED, SPLIT, UNKNOWN
-  split_degree: 0.0,
-  strength: 0.0,
-  clients: []
-}
+$manager = StateManager.new
+$clients = []
 
 get '/' do
   File.read(File.join('public', 'index.html'))
@@ -23,27 +20,39 @@ get '/cable' do
     ws = Faye::WebSocket.new(env)
 
     ws.on :open do |event|
-      $state[:clients] << ws
-      puts "Client connected. Total: #{$state[:clients].size}"
-      # Send current state immediately
-      ws.send($state.to_json)
+      $clients << ws
+      # Send current state
+      ws.send($manager.get_state.to_json)
     end
 
     ws.on :message do |event|
-      # Handle incoming messages (Vote, Admin commands)
-      # For now, just echo or log
-      p [:message, event.data]
+      data = JSON.parse(event.data) rescue {}
+      if data['type'] == 'vote'
+        $manager.add_vote(data['vote'])
+        broadcast_state
+      end
     end
 
     ws.on :close do |event|
-      $state[:clients].delete(ws)
-      puts "Client disconnected. Total: #{$state[:clients].size}"
+      $clients.delete(ws)
       ws = nil
     end
 
-    # Return async rack response
     ws.rack_response
   else
     "This is a WebSocket endpoint."
+  end
+end
+
+def broadcast_state
+  state = $manager.get_state.to_json
+  $clients.each { |ws| ws.send(state) }
+end
+
+# Background thread to update state (decay) every second
+Thread.new do
+  loop do
+    sleep 1
+    broadcast_state
   end
 end
