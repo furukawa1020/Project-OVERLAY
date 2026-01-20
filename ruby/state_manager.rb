@@ -18,6 +18,11 @@ class StateManager
     recalculate
   end
 
+  def reset
+    @votes = []
+    recalculate
+  end
+
   def get_state
     cleanup_old_votes
     # Recalculate periodically even if no new votes, to handle decay

@@ -15,6 +15,10 @@ get '/' do
   File.read(File.join('public', 'index.html'))
 end
 
+get '/admin' do
+  File.read(File.join('public', 'admin.html'))
+end
+
 get '/cable' do
   if Faye::WebSocket.websocket?(env)
     ws = Faye::WebSocket.new(env)
@@ -27,9 +31,13 @@ get '/cable' do
 
     ws.on :message do |event|
       data = JSON.parse(event.data) rescue {}
-      if data['type'] == 'vote'
+      
+      case data['type']
+      when 'vote'
         $manager.add_vote(data['vote'])
         broadcast_state
+      when 'admin'
+        handle_admin_command(data)
       end
     end
 
@@ -41,6 +49,18 @@ get '/cable' do
     ws.rack_response
   else
     "This is a WebSocket endpoint."
+  end
+end
+
+def handle_admin_command(data)
+  case data['command']
+  when 'reset'
+    $manager.reset
+    broadcast_state
+  when 'flash'
+    # Broadcast flash event directly to clients (Go renderer)
+    msg = { type: 'flash', word: data['word'], ttl: 1000 }.to_json
+    $clients.each { |ws| ws.send(msg) }
   end
 end
 

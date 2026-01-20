@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OVERLAY Admin</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #333;
+            color: #fff;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #555;
+            padding: 10px;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        button {
+            font-size: 16px;
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+
+        .btn-danger {
+            background: #d9534f;
+            color: white;
+            border: none;
+        }
+
+        .btn-warn {
+            background: #f0ad4e;
+            color: black;
+            border: none;
+        }
+
+        label {
+            display: block;
+            margin: 10px 0;
+        }
+
+        #status {
+            margin-top: 10px;
+            color: #888;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>OVERLAY Admin</h1>
+
+    <div class="section">
+        <h2>Session Control</h2>
+        <button class="btn-danger" onclick="sendCommand('reset')">RESET STATE</button>
+    </div>
+
+    <div class="section">
+        <h2>Manual Triggers</h2>
+        <button class="btn-warn" onclick="sendCommand('flash', {word: '決定？'})">Flash: 決定？</button>
+        <button class="btn-warn" onclick="sendCommand('flash', {word: '未共有'})">Flash: 未共有</button>
+        <button class="btn-warn" onclick="sendCommand('flash', {word: '時間'})">Flash: 時間</button>
+    </div>
+
+    <div class="section">
+        <h2>Monitoring</h2>
+        <div id="monitor">State: --</div>
+    </div>
+
+    <div id="status">Connecting...</div>
+
+    <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/cable`);
+
+        ws.onopen = () => {
+            document.getElementById('status').innerText = 'Connected';
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            document.getElementById('monitor').innerHTML =
+                `State: ${data.state}<br>` +
+                `Split: ${data.split_degree.toFixed(2)}<br>` +
+                `Strength: ${data.strength.toFixed(2)}<br>` +
+                `Votes: ${data.vote_count}`;
+        };
+
+        function sendCommand(type, payload = {}) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'admin', command: type, ...payload }));
+            }
+        }
+    </script>
+</body>
+
+</html>
