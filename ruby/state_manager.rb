@@ -2,13 +2,6 @@ class StateManager
   # Configuration imported from config.rb
   
   def initialize
-    @votes = [] # [{type: 'ok', ts: Time.now}, ...]
-    @current_state = 'UNKNOWN'
-    @split_degree = 0.0
-    @strength = 0.0
-  end
-
-  def initialize
     @current_state = 'UNKNOWN'
     @tension = 0.0 # 0.0 to 10.0 (Atmosphere Heat)
     @last_update = Time.now
@@ -27,15 +20,13 @@ class StateManager
     recalculate
   end
   
-  # Deprecated: add_vote is removed
-
   def reset
-    @votes = []
+    @tension = 0.0
+    @current_state = 'UNKNOWN'
     recalculate
   end
 
   def get_state
-    cleanup_old_votes
     # Recalculate periodically even if no new votes, to handle decay
     recalculate 
     {
@@ -46,11 +37,6 @@ class StateManager
   end
 
   private
-
-  def cleanup_old_votes
-    now = Time.now
-    @votes.reject! { |v| now - v[:ts] > Config::VOTE_WINDOW_SEC }
-  end
 
   def recalculate
     now = Time.now

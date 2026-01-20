@@ -1,11 +1,9 @@
 require 'sinatra'
 require 'rqrcode'
 require 'faye/websocket'
-Faye::WebSocket.load_adapter('puma')
 require_relative 'state_manager'
 require_relative 'config'
 
-set :server, 'puma'
 set :bind, '0.0.0.0'
 set :port, 4567
 

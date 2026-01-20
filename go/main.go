@@ -26,7 +26,7 @@ import (
 const (
 	ScreenWidth  = 1920
 	ScreenHeight = 1080
-	ServerHost   = "localhost:4567"
+	ServerHost   = "127.0.0.1:4567"
 )
 
 // Colors (Shaft Style)
