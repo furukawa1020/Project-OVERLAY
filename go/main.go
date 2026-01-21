@@ -74,6 +74,7 @@ type Game struct {
 	// Conversation State
 	lastWordTime   time.Time
 	currentSpeaker int // 0: Left, 1: Right
+	silenceStage   int // 0: None, 1: Dots, 2: Ma, 3: Chinmoku
 }
 
 type BarrageWord struct {
@@ -172,8 +173,27 @@ func (g *Game) Update() error {
 		g.targetBgColor = ColRed
 	}
 
-	// Lerp towards target
 	g.bgColor = lerpColor(g.bgColor, g.targetBgColor, 0.05)
+
+	// Check Silence Duration
+	silenceDur := time.Since(g.lastWordTime)
+
+	if silenceDur > 2*time.Second && g.silenceStage == 0 {
+		g.spawnWordInternal("...", false)
+		g.silenceStage = 1
+	}
+	if silenceDur > 5*time.Second && g.silenceStage == 1 {
+		g.spawnWordInternal("間", false)
+		g.silenceStage = 2
+	}
+	if silenceDur > 8*time.Second && g.silenceStage == 2 {
+		g.spawnWordInternal("沈黙", false) // Heavy fall
+		g.silenceStage = 3
+	}
+	if silenceDur > 12*time.Second && g.silenceStage == 3 {
+		g.spawnWordInternal("静寂", false) // Another heavy fall
+		g.silenceStage = 4
+	}
 
 	g.mu.Unlock()
 
