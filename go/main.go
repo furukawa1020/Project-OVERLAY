@@ -602,20 +602,158 @@ func (g *Game) handleMessage(msg []byte) {
 
 	if msgType == "spawn_word" {
 		text, _ := data["text"].(string)
-		style, _ := data["style"].(string)
-		g.spawnWordInternal(text, style)
+		// Pass entire data map as config
+		g.spawnWordInternal(text, data)
 	} else if msgType == "flash" {
 		if word, ok := data["word"].(string); ok {
-			// Manual trigger
-			g.spawnWordInternal(word, "glitch")
+			g.spawnWordInternal(word, map[string]interface{}{"style": "glitch"})
 		}
 	} else {
-		// Assume state update
 		var newState State
 		if err := json.Unmarshal(msg, &newState); err == nil {
 			g.state = newState
 		}
 	}
+}
+
+// Public wrapper with Lock (safe for external calls)
+func (g *Game) spawnWord(text string, glitch bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	cfg := map[string]interface{}{"style": "normal"}
+	if glitch { cfg["style"] = "glitch" }
+	g.spawnWordInternal(text, cfg)
+}
+
+// Internal implementation (Physics Executioner)
+// Logic moved to Ruby. Go just executes Params.
+func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
+	style, _ := config["style"].(string)
+	
+	// Update Target Background
+	if style != "glitch" && g.state.CurrentState != "SPLIT" {
+		if style == "conjunction" {
+			g.targetBgColor = color.RGBA{50, 50, 50, 255}
+		} else {
+			g.targetBgColor = textToColor(text)
+		}
+	}
+
+	// Turn Logic
+	if !strings.HasPrefix(style, "silence_") {
+		now := time.Now()
+		if now.Sub(g.lastWordTime) > 2000*time.Millisecond || style == "conjunction" {
+			g.currentSpeaker = (g.currentSpeaker + 1) % 2
+		}
+		g.lastWordTime = now
+	}
+
+	// Physics Defaults
+	nuanceScale := 1.0 + (g.micVolume * 3.0)
+	if nuanceScale > 4.0 { nuanceScale = 4.0 }
+	
+	scale := nuanceScale + rand.Float64()*0.5
+	life := 600
+	colorVal := ColWhite
+	scaleX := 1.0
+	
+	startX := 0.0
+	startY := 0.0
+	vx := 0.0
+	vy := 0.0
+	rot := (rand.Float64() - 0.5) * 0.5
+	vrot := (rand.Float64() - 0.5) * 0.1
+
+	// 1. Base Physics (Positioning)
+	if style == "glitch" {
+		scale *= 1.5
+		startX = float64(ScreenWidth/2) + rand.Float64()*400 - 200
+		vx = (rand.Float64() - 0.5) * 10
+		vy = (rand.Float64() - 0.5) * 10
+		colorVal = ColRed
+		life = 300
+	} else if style == "silence_dots" {
+		scale = 1.0; life = 300
+		startX = rand.Float64()*ScreenWidth; startY = rand.Float64()*ScreenHeight
+		vx = (rand.Float64()-0.5)*0.5; vy = (rand.Float64()-0.5)*0.5
+		colorVal = color.RGBA{100, 100, 100, 100}
+	} else if style == "silence_ma" {
+		scale = 3.0; life = 800
+		startX = ScreenWidth/2; startY = ScreenHeight/3
+		vx = 0; vy = 0
+		colorVal = color.RGBA{200, 200, 255, 200}
+	} else if style == "silence_heavy" {
+		scale = 5.0; life = 1000
+		startX = 100 + rand.Float64()*(ScreenWidth-200)
+		startY = -100
+		vx = 0; vy = 15.0
+		colorVal = color.RGBA{50, 50, 50, 255}
+	} else if style == "silence_abyss" {
+		scale = 7.0; life = 1200
+		startX = 100 + rand.Float64()*(ScreenWidth-200)
+		startY = ScreenHeight + 100
+		vx = 0; vy = -1.0
+		colorVal = color.RGBA{5, 5, 20, 255}
+	} else {
+		// Normal / Conjunction / Invert
+		if g.state.CurrentState == "SPLIT" {
+			startX = float64(ScreenWidth/2) + rand.Float64()*400 - 200
+			vx = (rand.Float64() - 0.5) * 10
+		} else if g.currentSpeaker == 0 {
+			startX = ScreenWidth*0.2 + rand.Float64()*100
+			vx = 5.0 + rand.Float64()*5.0
+		} else {
+			startX = ScreenWidth*0.8 - rand.Float64()*100
+			vx = -5.0 - rand.Float64()*5.0
+		}
+		startY = ScreenHeight*0.4 + rand.Float64()*200 - 100
+		vy = -5.0 - rand.Float64()*5.0
+	}
+
+	// 2. Ruby Overrides (Explicit Physics)
+	if val, ok := config["rot"].(float64); ok { rot = val }
+	if val, ok := config["scalex"].(float64); ok { scaleX = val }
+	if val, ok := config["vy"].(float64); ok { vy = val }
+	if val, ok := config["vy_mult"].(float64); ok { vy *= val }
+	
+	if colStr, ok := config["color"].(string); ok {
+		switch colStr {
+		case "cyan": colorVal = ColCyan
+		case "yellow": colorVal = ColYellow
+		case "grey": colorVal = color.RGBA{200, 200, 200, 150}
+		case "dark_grey": colorVal = color.RGBA{50, 50, 50, 255}
+		case "black": colorVal = color.RGBA{5, 5, 20, 255}
+		case "blue_white": colorVal = color.RGBA{200, 200, 255, 200}
+		case "grey_alpha": colorVal = color.RGBA{100, 100, 100, 100}
+		}
+	}
+
+	bw := BarrageWord{
+		Text:      text,
+		X:         startX,
+		Y:         startY,
+		VX:        vx,
+		VY:        vy,
+		Scale:     scale,
+		ScaleX:    scaleX,
+		Color:     colorVal,
+		Life:      life,
+		MaxLife:   life,
+		IsGlitch:  (style == "glitch"),
+		Rotation:  rot,
+		VRotation: vrot,
+		IsResting: false,
+		Image:     nil,
+		IsFiller:  (len(text) <= 3) && !strings.HasPrefix(style, "silence_"),
+	}
+
+	if g.state.CurrentState == "SPLIT" || style == "glitch" {
+		bw.Color = ColRed
+		bw.VX *= 2.0
+		bw.VY *= 2.0
+	}
+
+	g.barrage = append(g.barrage, bw)
 }
 
 			// DUPLICATE LOGIC FROM spawnWord but inline to avoid deadlock
