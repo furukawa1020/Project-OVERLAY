@@ -347,8 +347,8 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 	} else if text == "沈黙" {
 		scale = 5.0 // Massive
 		life = 1000
-		// Random X offset to prevent stacking
-		startX = float64(ScreenWidth)/2 + (rand.Float64()*400 - 200)
+		// Random X throughout screen (Avoid edges)
+		startX = 100 + rand.Float64()*(ScreenWidth-200)
 		startY = -100 // Drop from top
 		vx = 0
 		vy = 15.0                              // Heavy drop
@@ -356,8 +356,8 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 	} else if text == "静寂" {
 		scale = 7.0 // Even Bigger
 		life = 1200 // Lasts longer
-		// Random X offset
-		startX = float64(ScreenWidth)/2 + (rand.Float64()*500 - 250)
+		// Random X throughout screen
+		startX = 100 + rand.Float64()*(ScreenWidth-200)
 		startY = float64(ScreenHeight) + 100 // Rise from Abyss
 		vx = 0
 		vy = -1.0                            // Slow Ascension (Rising Up)
@@ -695,39 +695,20 @@ func main() {
 						game.conn.WriteJSON(msg)
 					}
 
-					// 2. Local Atmosphere Logic (Fallback)
-					dangerWords := []string{"嘘", "矛盾", "違う", "だめ", "無理", "変", "おかしい", "バグ", "ミス", "否定", "NO", "嫌", "怖い"}
-					isDanger := false
-					for _, dw := range dangerWords {
-						if strings.Contains(txt, dw) {
-							isDanger = true
-							break
+					// 2. Local Atmosphere Logic (Fallback) - DISABLED (Migrated to Ruby)
+					/*
+						dangerWords := []string{"嘘", "矛盾", "違う", "だめ", "無理", "変", "おかしい", "バグ", "ミス", "否定", "NO", "嫌", "怖い"}
+						isDanger := false
+						for _, dw := range dangerWords {
+							if strings.Contains(txt, dw) {
+								isDanger = true
+								break
+							}
 						}
-					}
-
-					isGlitch := len(txt) < 3
-
-					if isDanger {
-						game.mu.Lock()
-						game.state.CurrentState = "SPLIT"
-						game.mu.Unlock()
-						// Reset after 3 seconds?
-						// ideally use a timer in Update(), but for now just let it stick or decay.
-						// Let's launch a decay timer goroutine
-						go func() {
-							time.Sleep(2 * time.Second)
-							game.mu.Lock()
-							game.state.CurrentState = "UNKNOWN" // Revert to neutral
-							game.mu.Unlock()
-						}()
-						isGlitch = true // Danger words always glitch
-					} else {
-						// Green/White interaction usually implies alignment, but we default to UNKNOWN
-						// If user says positive things?
-						// For now, default is just spawning words.
-					}
-
-					game.spawnWord(txt, isGlitch)
+						isGlitch := len(txt) < 3
+						if isDanger { ... }
+						game.spawnWord(txt, isGlitch)
+					*/
 				}
 			}
 		}()

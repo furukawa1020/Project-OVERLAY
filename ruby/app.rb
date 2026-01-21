@@ -62,15 +62,23 @@ get '/cable' do
       case data['type']
       when 'speech_text'
         # Goからの音声認識テキストを受信
-        $manager.process_text(data['text'])
+        style = $manager.process_text(data['text'])
         broadcast_state
+        
+        # Analyze and Broadcast Spawn Command immediately
+        msg = {
+          type: 'spawn_word',
+          text: data['text'],
+          style: style
+        }.to_json
+        $clients.each { |client| client.send(msg) }
+        
       when 'vote'
         # Legacy/Mobile input (Keep only for manual override if needed)
         # $manager.add_vote(data['vote']) 
         broadcast_state
       when 'flash_word'
         # 参加者が危険ワードを押した場合
-        # 現状は即座にFlashさせる（要件によっては投票制にするが、露出重視なら即時で良い）
         broadcast_flash(data['word'])
       when 'admin'
         handle_admin_command(data)
@@ -108,10 +116,22 @@ def broadcast_state
   $clients.each { |ws| ws.send(state) }
 end
 
-# Background thread to update state (decay) every second
+# Background thread to update state (decay) and check Silence
 Thread.new do
   loop do
-    sleep 1
+    sleep 0.2 # Check 5 times a second for better response, decay is handled by time delta anyway
+    
+    # Silence Check
+    word, style = $manager.check_silence
+    if word
+      msg = {
+        type: 'spawn_word',
+        text: word,
+        style: style
+      }.to_json
+      $clients.each { |ws| ws.send(msg) }
+    end
+    
     broadcast_state
   end
 end
