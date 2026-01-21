@@ -249,23 +249,36 @@ func textToColor(text string) color.RGBA {
 	}
 }
 
+// Public wrapper with Lock (safe for external calls)
 func (g *Game) spawnWord(text string, glitch bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.spawnWordInternal(text, glitch)
+}
 
-	// Update Target Background based on text
-	if !glitch && g.state.CurrentState != "SPLIT" {
-		g.targetBgColor = textToColor(text)
+// Internal implementation (Assumes Lock is held)
+func (g *Game) spawnWordInternal(text string, glitch bool) {
+	// Reset Silence Stage on legitimate input (not generated silence words)
+	isSilenceWord := (text == "..." || text == "間" || text == "沈黙" || text == "静寂")
+	if !isSilenceWord {
+		g.silenceStage = 0
+
+		// Update Target Background based on text
+		if !glitch && g.state.CurrentState != "SPLIT" {
+			g.targetBgColor = textToColor(text)
+		}
 	}
 
-	// Conversation Turn Logic
-	now := time.Now()
-	silenceDuration := now.Sub(g.lastWordTime)
-	g.lastWordTime = now
+	// Conversation Turn Logic (Only for real words)
+	if !isSilenceWord {
+		now := time.Now()
+		silenceDuration := now.Sub(g.lastWordTime)
+		g.lastWordTime = now
 
-	// If silence > 1.5s, switch speaker or reset
-	if silenceDuration > 1500*time.Millisecond {
-		g.currentSpeaker = (g.currentSpeaker + 1) % 2
+		// If silence > 2.0s (was 1.5), switch speaker
+		if silenceDuration > 2000*time.Millisecond {
+			g.currentSpeaker = (g.currentSpeaker + 1) % 2
+		}
 	}
 
 	// Physics Init
@@ -282,39 +295,70 @@ func (g *Game) spawnWord(text string, glitch bool) {
 		scale *= 1.5
 	}
 
-	// Position based on Speaker
-	var startX float64
-	var vx float64
+	// Custom Physics for Silence Words
+	life := 600
+	colorVal := ColWhite
+	var startX, startY, vx, vy float64
 
-	if g.state.CurrentState == "SPLIT" {
-		// Chaos: Center Eruption
-		startX = float64(ScreenWidth/2) + rand.Float64()*400 - 200
-		vx = (rand.Float64() - 0.5) * 10
-	} else if g.currentSpeaker == 0 {
-		// Left Speaker (throws to right)
-		startX = float64(ScreenWidth)*0.2 + rand.Float64()*100
-		vx = 5.0 + rand.Float64()*5.0
+	if text == "..." {
+		scale = 1.0
+		life = 300
+		startX = rand.Float64() * float64(ScreenWidth)
+		startY = rand.Float64() * float64(ScreenHeight)
+		vx = (rand.Float64() - 0.5) * 0.5
+		vy = (rand.Float64() - 0.5) * 0.5         // Float gently
+		colorVal = color.RGBA{100, 100, 100, 100} // Grey transparent
+	} else if text == "間" {
+		scale = 3.0
+		life = 800
+		startX = float64(ScreenWidth) / 2
+		startY = float64(ScreenHeight) / 3
+		vx = 0
+		vy = 0.05                                 // Very slow sink
+		colorVal = color.RGBA{200, 200, 255, 200} // Bluish White
+	} else if text == "沈黙" || text == "静寂" {
+		scale = 5.0 // Massive
+		life = 1000
+		startX = float64(ScreenWidth) / 2
+		startY = 0 // Drop from top
+		vx = 0
+		vy = 15.0                              // Heavy drop
+		colorVal = color.RGBA{50, 50, 50, 255} // Dark Grey (Almost Black)
 	} else {
-		// Right Speaker (throws to left)
-		startX = float64(ScreenWidth)*0.8 - rand.Float64()*100
-		vx = -5.0 - rand.Float64()*5.0
+		// Normal Word Physics
+		// Position based on Speaker
+		if g.state.CurrentState == "SPLIT" {
+			// Chaos: Center Eruption
+			startX = float64(ScreenWidth/2) + rand.Float64()*400 - 200
+			vx = (rand.Float64() - 0.5) * 10
+		} else if g.currentSpeaker == 0 {
+			// Left Speaker (throws to right)
+			startX = float64(ScreenWidth)*0.2 + rand.Float64()*100
+			vx = 5.0 + rand.Float64()*5.0
+		} else {
+			// Right Speaker (throws to left)
+			startX = float64(ScreenWidth)*0.8 - rand.Float64()*100
+			vx = -5.0 - rand.Float64()*5.0
+		}
+		startY = float64(ScreenHeight)*0.4 + rand.Float64()*200 - 100
+		vy = -5.0 - rand.Float64()*5.0
 	}
 
 	bw := BarrageWord{
 		Text:      text,
 		X:         startX,
-		Y:         float64(ScreenHeight)*0.4 + rand.Float64()*200 - 100, // Mid-height
+		Y:         startY,
 		VX:        vx,
-		VY:        -5.0 - rand.Float64()*5.0, // Toss up
+		VY:        vy,
 		Scale:     scale,
-		Color:     ColWhite, // Default white, draw calc handles glitch color
-		Life:      600,      // Longer life for piling up
-		MaxLife:   600,
+		Color:     colorVal, // Default white, draw calc handles glitch color
+		Life:      life,     // Longer life for piling up
+		MaxLife:   life,
 		IsGlitch:  glitch,
 		Rotation:  (rand.Float64() - 0.5) * 0.5,
 		VRotation: (rand.Float64() - 0.5) * 0.1,
 		IsResting: false,
-		IsFiller:  len(text) <= 3, // Simple check for fillers
+		IsFiller:  len(text) <= 3 && !isSilenceWord, // Simple check for fillers
 	}
 
 	if g.state.CurrentState == "SPLIT" || glitch {
