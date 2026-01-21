@@ -70,6 +70,10 @@ type Game struct {
 	// Synesthetic state
 	bgColor       color.RGBA
 	targetBgColor color.RGBA
+
+	// Conversation State
+	lastWordTime   time.Time
+	currentSpeaker int // 0: Left, 1: Right
 }
 
 type BarrageWord struct {
@@ -77,10 +81,16 @@ type BarrageWord struct {
 	X, Y     float64
 	VX, VY   float64
 	Scale    float64
-	Color    color.Color
+	Color    color.Color // Changed from color.RGBA to color.Color to match typical Ebiten
 	Life     int
 	MaxLife  int
 	IsGlitch bool
+
+	// Physics
+	Rotation  float64
+	VRotation float64
+	IsResting bool
+	IsFiller  bool
 }
 
 func (g *Game) Update() error {
@@ -106,11 +116,49 @@ func (g *Game) Update() error {
 		g.micVolume *= 0.95
 	}
 
-	// Update Barrage
+	// Update Barrage with Physics
 	newBarrage := []BarrageWord{}
+	gravity := 0.25
+	floorY := float64(ScreenHeight) - 100.0
+
 	for _, b := range g.barrage {
-		b.X += b.VX
-		b.Y += b.VY
+		// Apply Physics if not resting
+		if !b.IsResting {
+			// Gravity (lighter for fillers)
+			grav := gravity
+			if b.IsFiller {
+				grav *= 0.2
+			}
+
+			b.VY += grav
+			b.X += b.VX
+			b.Y += b.VY
+			b.Rotation += b.VRotation
+
+			// Friction
+			b.VX *= 0.98
+			b.VRotation *= 0.98
+
+			// Floor Collision
+			if b.Y > floorY {
+				b.Y = floorY
+				b.VY *= -0.6 // Bounce
+				b.VX *= 0.8  // Floor friction
+
+				// Stop if slow enough
+				if math.Abs(b.VY) < 1.0 {
+					b.IsResting = true
+					b.VY = 0
+				}
+			}
+
+			// Wall Bounce
+			if b.X < 50 || b.X > ScreenWidth-50 {
+				b.VX *= -0.8
+				b.X += b.VX // Push back
+			}
+		}
+
 		b.Life--
 		if b.Life > 0 {
 			newBarrage = append(newBarrage, b)
@@ -190,25 +238,63 @@ func (g *Game) spawnWord(text string, glitch bool) {
 		g.targetBgColor = textToColor(text)
 	}
 
-	scale := 1.0 + rand.Float64()
+	// Conversation Turn Logic
+	now := time.Now()
+	silenceDuration := now.Sub(g.lastWordTime)
+	g.lastWordTime = now
+
+	// If silence > 1.5s, switch speaker or reset
+	if silenceDuration > 1500*time.Millisecond {
+		g.currentSpeaker = (g.currentSpeaker + 1) % 2
+	}
+
+	// Physics Init
+	// Nuance: Volume -> Scale
+	// We need instantaneous volume here. g.micVolume is smoothed.
+	// Let's use g.micVolume as a proxy for now.
+	nuanceScale := 1.0 + (g.micVolume * 3.0) // 1.0 to 4.0
+	if nuanceScale > 4.0 {
+		nuanceScale = 4.0
+	}
+
+	scale := nuanceScale + rand.Float64()*0.5
 	if glitch {
 		scale *= 1.5
 	}
 
-	// Start from random side or center? Barrage usually flows right to left or random.
-	// Let's do "Eruption" style from center-ish for conversation.
+	// Position based on Speaker
+	var startX float64
+	var vx float64
+
+	if g.state.CurrentState == "SPLIT" {
+		// Chaos: Center Eruption
+		startX = float64(ScreenWidth/2) + rand.Float64()*400 - 200
+		vx = (rand.Float64() - 0.5) * 10
+	} else if g.currentSpeaker == 0 {
+		// Left Speaker (throws to right)
+		startX = float64(ScreenWidth)*0.2 + rand.Float64()*100
+		vx = 5.0 + rand.Float64()*5.0
+	} else {
+		// Right Speaker (throws to left)
+		startX = float64(ScreenWidth)*0.8 - rand.Float64()*100
+		vx = -5.0 - rand.Float64()*5.0
+	}
 
 	bw := BarrageWord{
-		Text:     text,
-		X:        float64(ScreenWidth/2) + rand.Float64()*400 - 200,
-		Y:        float64(ScreenHeight/2) + rand.Float64()*200 - 100,
-		VX:       (rand.Float64() - 0.5) * 5,
-		VY:       (rand.Float64() - 0.5) * 5,
-		Scale:    scale,
-		Color:    ColWhite,
-		Life:     180 + rand.Intn(60), // 3-4 seconds
-		MaxLife:  200,
-		IsGlitch: glitch,
+		Text:      text,
+		X:         startX,
+		Y:         float64(ScreenHeight)*0.4 + rand.Float64()*200 - 100, // Mid-height
+		VX:        vx,
+		VY:        -5.0 - rand.Float64()*5.0, // Toss up
+		Scale:     scale,
+		Color:     ColWhite, // Default white, draw calc handles glitch color
+		Life:      600,      // Longer life for piling up
+		MaxLife:   600,
+		IsGlitch:  glitch,
+		Rotation:  (rand.Float64() - 0.5) * 0.5,
+		VRotation: (rand.Float64() - 0.5) * 0.1,
+		IsResting: false,
+		IsFiller:  len(text) <= 3, // Simple check for fillers
 	}
 
 	if g.state.CurrentState == "SPLIT" || glitch {
