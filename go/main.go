@@ -260,12 +260,37 @@ func (g *Game) spawnWord(text string, glitch bool) {
 func (g *Game) spawnWordInternal(text string, glitch bool) {
 	// Reset Silence Stage on legitimate input (not generated silence words)
 	isSilenceWord := (text == "..." || text == "間" || text == "沈黙" || text == "静寂")
+
+	// Semantic Categories
+	conjunctions := []string{"でも", "しかし", "だが", "逆に", "とは言え", "けど", "反対に"}
+	hesitations := []string{"えっと", "うーん", "あの", "多分", "かな", "なんか", "えー"}
+
+	isConjunction := false
+	isHesitation := false
+
+	for _, c := range conjunctions {
+		if strings.Contains(text, c) {
+			isConjunction = true
+			break
+		}
+	}
+	for _, h := range hesitations {
+		if strings.Contains(text, h) {
+			isHesitation = true
+			break
+		}
+	}
+
 	if !isSilenceWord {
 		g.silenceStage = 0
 
 		// Update Target Background based on text
 		if !glitch && g.state.CurrentState != "SPLIT" {
-			g.targetBgColor = textToColor(text)
+			if isConjunction {
+				g.targetBgColor = color.RGBA{50, 50, 50, 255} // Grey out
+			} else {
+				g.targetBgColor = textToColor(text)
+			}
 		}
 	}
 
@@ -275,16 +300,18 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 		silenceDuration := now.Sub(g.lastWordTime)
 		g.lastWordTime = now
 
-		// If silence > 2.0s (was 1.5), switch speaker
+		// If silence > 2.0s, switch speaker
 		if silenceDuration > 2000*time.Millisecond {
+			g.currentSpeaker = (g.currentSpeaker + 1) % 2
+		}
+
+		// Conjunctions trigger immediate turn switch (interruption)
+		if isConjunction {
 			g.currentSpeaker = (g.currentSpeaker + 1) % 2
 		}
 	}
 
 	// Physics Init
-	// Nuance: Volume -> Scale
-	// We need instantaneous volume here. g.micVolume is smoothed.
-	// Let's use g.micVolume as a proxy for now.
 	nuanceScale := 1.0 + (g.micVolume * 3.0) // 1.0 to 4.0
 	if nuanceScale > 4.0 {
 		nuanceScale = 4.0
@@ -299,6 +326,7 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 	life := 600
 	colorVal := ColWhite
 	var startX, startY, vx, vy float64
+	var rot, vrot float64
 
 	if text == "..." {
 		scale = 1.0
@@ -314,16 +342,26 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 		startX = float64(ScreenWidth) / 2
 		startY = float64(ScreenHeight) / 3
 		vx = 0
-		vy = 0.05                                 // Very slow sink
+		vy = 0.00                                 // Suspended in time (No movement)
 		colorVal = color.RGBA{200, 200, 255, 200} // Bluish White
-	} else if text == "沈黙" || text == "静寂" {
+	} else if text == "沈黙" {
 		scale = 5.0 // Massive
 		life = 1000
-		startX = float64(ScreenWidth) / 2
-		startY = 0 // Drop from top
+		// Random X offset to prevent stacking
+		startX = float64(ScreenWidth)/2 + (rand.Float64()*400 - 200)
+		startY = -100 // Drop from top
 		vx = 0
 		vy = 15.0                              // Heavy drop
-		colorVal = color.RGBA{50, 50, 50, 255} // Dark Grey (Almost Black)
+		colorVal = color.RGBA{50, 50, 50, 255} // Dark Grey
+	} else if text == "静寂" {
+		scale = 7.0 // Even Bigger
+		life = 1200 // Lasts longer
+		// Random X offset
+		startX = float64(ScreenWidth)/2 + (rand.Float64()*500 - 250)
+		startY = float64(ScreenHeight) + 100 // Rise from Abyss
+		vx = 0
+		vy = -1.0                            // Slow Ascension (Rising Up)
+		colorVal = color.RGBA{5, 5, 20, 255} // Deepest Blue/Black
 	} else {
 		// Normal Word Physics
 		// Position based on Speaker
@@ -342,6 +380,25 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 		}
 		startY = float64(ScreenHeight)*0.4 + rand.Float64()*200 - 100
 		vy = -5.0 - rand.Float64()*5.0
+
+		rot = (rand.Float64() - 0.5) * 0.5
+		vrot = (rand.Float64() - 0.5) * 0.1
+
+		// Apply Semantic Physics
+		if isConjunction {
+			vx *= -1.5           // REVERSE FLOW (Interruption)
+			rot = math.Pi        // UPSIDE DOWN (Inversion)
+			colorVal = ColYellow // Highlight
+			scale *= 1.2
+		}
+
+		if isHesitation {
+			vx *= 0.2                                 // Slow down
+			vy *= 0.2                                 // Float
+			vrot *= 0.05                              // No spin
+			colorVal = color.RGBA{200, 200, 200, 150} // Transparent/Pale
+			scale *= 0.8
+		}
 	}
 
 	bw := BarrageWord{
@@ -355,10 +412,10 @@ func (g *Game) spawnWordInternal(text string, glitch bool) {
 		Life:      life,     // Longer life for piling up
 		MaxLife:   life,
 		IsGlitch:  glitch,
-		Rotation:  (rand.Float64() - 0.5) * 0.5,
-		VRotation: (rand.Float64() - 0.5) * 0.1,
+		Rotation:  rot,  // Use local var
+		VRotation: vrot, // Use local var
 		IsResting: false,
-		IsFiller:  len(text) <= 3 && !isSilenceWord, // Simple check for fillers
+		IsFiller:  (len(text) <= 3 || isHesitation) && !isSilenceWord, // Simple check for fillers
 	}
 
 	if g.state.CurrentState == "SPLIT" || glitch {
