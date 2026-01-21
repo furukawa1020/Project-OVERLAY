@@ -92,6 +92,10 @@ type BarrageWord struct {
 	VRotation float64
 	IsResting bool
 	IsFiller  bool
+
+	// Visual Cache
+	Image  *ebiten.Image
+	ScaleX float64 // For horizontal mirroring (-1.0)
 }
 
 func (g *Game) Update() error {
@@ -253,7 +257,11 @@ func textToColor(text string) color.RGBA {
 func (g *Game) spawnWord(text string, glitch bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.spawnWordInternal(text, glitch)
+	style := "normal"
+	if glitch {
+		style = "glitch"
+	}
+	g.spawnWordInternal(text, style)
 }
 
 // Internal implementation (Assumes Lock is held)
@@ -483,19 +491,33 @@ func (g *Game) drawGeometry(screen *ebiten.Image) {
 }
 
 func (g *Game) drawBarrage(screen *ebiten.Image) {
-	g.mu.RLock()
-	words := make([]BarrageWord, len(g.barrage))
-	copy(words, g.barrage)
-	// currentState := g.state.CurrentState
-	g.mu.RUnlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
 	if g.jpFaceBig == nil {
 		return
 	}
 
-	for _, b := range words {
-		bounds := text.BoundString(g.jpFaceBig, b.Text)
-		w, h := bounds.Max.X-bounds.Min.X, bounds.Max.Y-bounds.Min.Y
+	for i := range g.barrage {
+		b := &g.barrage[i] // Pointer access to update Cache
+
+		// Lazy Cache Image
+		if b.Image == nil {
+			rect := text.BoundString(g.jpFaceBig, b.Text)
+			w := rect.Max.X - rect.Min.X + 4 // Padding
+			h := rect.Max.Y - rect.Min.Y + 4
+			if w <= 0 {
+				w = 1
+			}
+			if h <= 0 {
+				h = 1
+			}
+
+			img := ebiten.NewImage(w, h)
+			// text.Draw draws starting at dot; need to shift by -Min
+			text.Draw(img, b.Text, g.jpFaceBig, -rect.Min.X+2, -rect.Min.Y+2, b.Color)
+			b.Image = img
+		}
 
 		// Glitch Effect: Random Jitter
 		jx, jy := 0.0, 0.0
@@ -504,23 +526,28 @@ func (g *Game) drawBarrage(screen *ebiten.Image) {
 			jy = (rand.Float64() - 0.5) * 10
 		}
 
+		w, h := b.Image.Size()
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(float64(-w/2), float64(-h/2))
-		op.GeoM.Scale(b.Scale, b.Scale)
-		op.GeoM.Rotate(0.1 * math.Sin(float64(g.frameCount)*0.05))
+
+		// Center Origin for Rotation/Scaling
+		op.GeoM.Translate(float64(-w)/2, float64(-h)/2)
+
+		// Apply Transformations
+		scaleX := b.ScaleX
+		if scaleX == 0 {
+			scaleX = 1.0
+		} // Safety
+		op.GeoM.Scale(b.Scale*scaleX, b.Scale)
+
+		// Apply Physics Rotation + Wave
+		wave := 0.1 * math.Sin(float64(g.frameCount)*0.05)
+		op.GeoM.Rotate(b.Rotation + wave)
+
+		// Move to Position
 		op.GeoM.Translate(b.X+jx, b.Y+jy)
 
-		// Alpha decay
-		alpha := float64(b.Life) / float64(b.MaxLife)
-		if alpha < 0.2 {
-			alpha = 0.2
-		}
-
-		// Ebiten doesn't support direct alpha on text easily without shaders or color M,
-		// but we can use ColorScale in newer versions or just stick to solid for Shaft style.
-		// Shaft style is solid, so keep it solid.
-
-		text.Draw(screen, b.Text, g.jpFaceBig, int(b.X+jx), int(b.Y+jy), b.Color)
+		// Draw
+		screen.DrawImage(b.Image, op)
 	}
 }
 
@@ -571,12 +598,25 @@ func (g *Game) handleMessage(msg []byte) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	if msgType, ok := data["type"].(string); ok && msgType == "flash" {
+	msgType, _ := data["type"].(string)
+
+	if msgType == "spawn_word" {
+		text, _ := data["text"].(string)
+		style, _ := data["style"].(string)
+		g.spawnWordInternal(text, style)
+	} else if msgType == "flash" {
 		if word, ok := data["word"].(string); ok {
-			// Manual trigger via Admin spawning a glitch word
-			// We need to unlock to call spawnWord because spawnWord locks.
-			// Ideally refactor spawnWord to internalSpawnWord without lock.
-			// For now, let's just do logic inline since we are locked.
+			// Manual trigger
+			g.spawnWordInternal(word, "glitch")
+		}
+	} else {
+		// Assume state update
+		var newState State
+		if err := json.Unmarshal(msg, &newState); err == nil {
+			g.state = newState
+		}
+	}
+}
 
 			// DUPLICATE LOGIC FROM spawnWord but inline to avoid deadlock
 			scale := 2.0

@@ -28,7 +28,12 @@ class StateManager
   end
   
   def analyze_semantics(text)
-    # Ruby-strength: Flexible text analysis
+    # Inversion Logic
+    return :invert_v if (text.include?("上下") || text.include?("天井") || text.include?("逆さま")) && (text.include?("反転") || text.include?("逆"))
+    return :invert_h if (text.include?("左右") || text.include?("鏡")) && (text.include?("反転") || text.include?("逆"))
+    return :invert_c if (text.include?("色") || text.include?("カラー")) && (text.include?("反転") || text.include?("違う"))
+    
+    # Existing Logic
     return :conjunction if ["でも", "しかし", "だが", "逆に", "とは言え", "けど", "反対に"].any? { |w| text.include?(w) }
     return :hesitation if ["えっと", "うーん", "あの", "多分", "かな", "なんか", "えー"].any? { |w| text.include?(w) }
     return :question if text.include?("？") || text.include?("?")
