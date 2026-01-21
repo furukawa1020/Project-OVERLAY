@@ -62,15 +62,15 @@ get '/cable' do
       case data['type']
       when 'speech_text'
         # Goからの音声認識テキストを受信
-        style = $manager.process_text(data['text'])
+        config = $manager.process_text(data['text'])
         broadcast_state
         
         # Analyze and Broadcast Spawn Command immediately
         msg = {
           type: 'spawn_word',
-          text: data['text'],
-          style: style
-        }.to_json
+          text: data['text']
+        }.merge(config).to_json # Merge config into top level
+        
         $clients.each { |client| client.send(msg) }
         
       when 'vote'
@@ -119,16 +119,15 @@ end
 # Background thread to update state (decay) and check Silence
 Thread.new do
   loop do
-    sleep 0.2 # Check 5 times a second for better response, decay is handled by time delta anyway
+    sleep 0.2 # Check 5 times a second for better response
     
     # Silence Check
-    word, style = $manager.check_silence
+    word, config = $manager.check_silence
     if word
       msg = {
         type: 'spawn_word',
-        text: word,
-        style: style
-      }.to_json
+        text: word
+      }.merge(config).to_json
       $clients.each { |ws| ws.send(msg) }
     end
     

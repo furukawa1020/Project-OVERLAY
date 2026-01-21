@@ -28,45 +28,76 @@ class StateManager
   end
   
   def analyze_semantics(text)
+    # Default Config
+    config = { style: 'normal', rot: 0.0, scalex: 1.0, color: 'white', vy_mult: 1.0 }
+
     # Inversion Logic
-    return :invert_v if (text.include?("上下") || text.include?("天井") || text.include?("逆さま")) && (text.include?("反転") || text.include?("逆"))
-    return :invert_h if (text.include?("左右") || text.include?("鏡")) && (text.include?("反転") || text.include?("逆"))
-    return :invert_c if (text.include?("色") || text.include?("カラー")) && (text.include?("反転") || text.include?("違う"))
+    if (text.include?("上下") || text.include?("天井") || text.include?("逆さま")) && (text.include?("反転") || text.include?("逆"))
+      config[:style] = 'invert_v'
+      config[:rot] = 3.14159
+      config[:vy_mult] = -1.0
+      config[:color] = 'cyan'
+      return config
+    end
+
+    if (text.include?("左右") || text.include?("鏡")) && (text.include?("反転") || text.include?("逆"))
+      config[:style] = 'invert_h'
+      config[:scalex] = -1.0
+      config[:color] = 'cyan'
+      return config
+    end
+
+    if (text.include?("色") || text.include?("カラー")) && (text.include?("反転") || text.include?("違う"))
+      config[:style] = 'invert_c'
+      config[:color] = 'cyan'
+      return config
+    end
     
-    # Existing Logic
-    return :conjunction if ["でも", "しかし", "だが", "逆に", "とは言え", "けど", "反対に"].any? { |w| text.include?(w) }
-    return :hesitation if ["えっと", "うーん", "あの", "多分", "かな", "なんか", "えー"].any? { |w| text.include?(w) }
-    return :question if text.include?("？") || text.include?("?")
-    :normal
+    # Semantic Logic
+    if ["でも", "しかし", "だが", "逆に", "とは言え", "けど", "反対に"].any? { |w| text.include?(w) }
+      config[:style] = 'conjunction'
+      config[:scalex] = -1.0
+      config[:rot] = 3.14159
+      config[:color] = 'yellow'
+      return config
+    end
+
+    if ["えっと", "うーん", "あの", "多分", "かな", "なんか", "えー"].any? { |w| text.include?(w) }
+      config[:style] = 'hesitation'
+      config[:color] = 'grey'
+      return config
+    end
+
+    config
   end
   
   def check_silence
-    # Returns a silence word if a threshold is crossed, else nil
+    # Returns word and CONFIG Hash
     now = Time.now
     duration = now - @last_speech_time
     
     next_word = nil
-    style = nil
+    config = nil
 
     if duration > 2.0 && @silence_stage == 0
       next_word = "..."
-      style = :silence_dots
+      config = { style: 'silence_dots', color: 'grey_alpha' }
       @silence_stage = 1
     elsif duration > 5.0 && @silence_stage == 1
       next_word = "間"
-      style = :silence_ma
+      config = { style: 'silence_ma', color: 'blue_white', vy: 0.0 }
       @silence_stage = 2
     elsif duration > 8.0 && @silence_stage == 2
       next_word = "沈黙"
-      style = :silence_heavy
+      config = { style: 'silence_heavy', color: 'dark_grey', vy: 15.0 }
       @silence_stage = 3
     elsif duration > 12.0 && @silence_stage == 3
       next_word = "静寂"
-      style = :silence_abyss
+      config = { style: 'silence_abyss', color: 'black', vy: -1.0 }
       @silence_stage = 4
     end
     
-    return next_word, style
+    return next_word, config
   end
   
   def reset
