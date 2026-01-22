@@ -715,6 +715,7 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 	if val, ok := config["scalex"].(float64); ok { scaleX = val }
 	if val, ok := config["vy"].(float64); ok { vy = val }
 	if val, ok := config["vy_mult"].(float64); ok { vy *= val }
+	if val, ok := config["scale"].(float64); ok { scale = val } // Added Override
 	
 	if colStr, ok := config["color"].(string); ok {
 		switch colStr {
