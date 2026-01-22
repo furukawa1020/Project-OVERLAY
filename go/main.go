@@ -36,6 +36,8 @@ var (
 	ColBlack  = color.RGBA{10, 10, 10, 255}
 	ColWhite  = color.RGBA{240, 240, 240, 255}
 	ColYellow = color.RGBA{253, 216, 53, 255}
+	ColCyan   = color.RGBA{0, 255, 255, 255}
+	ColCyan   = color.RGBA{0, 255, 255, 255}
 )
 
 type State struct {
@@ -621,7 +623,9 @@ func (g *Game) spawnWord(text string, glitch bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	cfg := map[string]interface{}{"style": "normal"}
-	if glitch { cfg["style"] = "glitch" }
+	if glitch {
+		cfg["style"] = "glitch"
+	}
 	g.spawnWordInternal(text, cfg)
 }
 
@@ -629,7 +633,7 @@ func (g *Game) spawnWord(text string, glitch bool) {
 // Logic moved to Ruby. Go just executes Params.
 func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 	style, _ := config["style"].(string)
-	
+
 	// Update Target Background
 	if style != "glitch" && g.state.CurrentState != "SPLIT" {
 		if style == "conjunction" {
@@ -650,13 +654,15 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 
 	// Physics Defaults
 	nuanceScale := 1.0 + (g.micVolume * 3.0)
-	if nuanceScale > 4.0 { nuanceScale = 4.0 }
-	
+	if nuanceScale > 4.0 {
+		nuanceScale = 4.0
+	}
+
 	scale := nuanceScale + rand.Float64()*0.5
 	life := 600
 	colorVal := ColWhite
 	scaleX := 1.0
-	
+
 	startX := 0.0
 	startY := 0.0
 	vx := 0.0
@@ -673,26 +679,36 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 		colorVal = ColRed
 		life = 300
 	} else if style == "silence_dots" {
-		scale = 1.0; life = 300
-		startX = rand.Float64()*ScreenWidth; startY = rand.Float64()*ScreenHeight
-		vx = (rand.Float64()-0.5)*0.5; vy = (rand.Float64()-0.5)*0.5
+		scale = 1.0
+		life = 300
+		startX = rand.Float64() * ScreenWidth
+		startY = rand.Float64() * ScreenHeight
+		vx = (rand.Float64() - 0.5) * 0.5
+		vy = (rand.Float64() - 0.5) * 0.5
 		colorVal = color.RGBA{100, 100, 100, 100}
 	} else if style == "silence_ma" {
-		scale = 3.0; life = 800
-		startX = ScreenWidth/2; startY = ScreenHeight/3
-		vx = 0; vy = 0
+		scale = 3.0
+		life = 800
+		startX = ScreenWidth / 2
+		startY = ScreenHeight / 3
+		vx = 0
+		vy = 0
 		colorVal = color.RGBA{200, 200, 255, 200}
 	} else if style == "silence_heavy" {
-		scale = 5.0; life = 1000
+		scale = 5.0
+		life = 1000
 		startX = 100 + rand.Float64()*(ScreenWidth-200)
 		startY = -100
-		vx = 0; vy = 15.0
+		vx = 0
+		vy = 15.0
 		colorVal = color.RGBA{50, 50, 50, 255}
 	} else if style == "silence_abyss" {
-		scale = 7.0; life = 1200
+		scale = 7.0
+		life = 1200
 		startX = 100 + rand.Float64()*(ScreenWidth-200)
 		startY = ScreenHeight + 100
-		vx = 0; vy = -1.0
+		vx = 0
+		vy = -1.0
 		colorVal = color.RGBA{5, 5, 20, 255}
 	} else {
 		// Normal / Conjunction / Invert
@@ -711,21 +727,38 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 	}
 
 	// 2. Ruby Overrides (Explicit Physics)
-	if val, ok := config["rot"].(float64); ok { rot = val }
-	if val, ok := config["scalex"].(float64); ok { scaleX = val }
-	if val, ok := config["vy"].(float64); ok { vy = val }
-	if val, ok := config["vy_mult"].(float64); ok { vy *= val }
-	if val, ok := config["scale"].(float64); ok { scale = val } // Added Override
-	
+	if val, ok := config["rot"].(float64); ok {
+		rot = val
+	}
+	if val, ok := config["scalex"].(float64); ok {
+		scaleX = val
+	}
+	if val, ok := config["vy"].(float64); ok {
+		vy = val
+	}
+	if val, ok := config["vy_mult"].(float64); ok {
+		vy *= val
+	}
+	if val, ok := config["scale"].(float64); ok {
+		scale = val
+	} // Added Override
+
 	if colStr, ok := config["color"].(string); ok {
 		switch colStr {
-		case "cyan": colorVal = ColCyan
-		case "yellow": colorVal = ColYellow
-		case "grey": colorVal = color.RGBA{200, 200, 200, 150}
-		case "dark_grey": colorVal = color.RGBA{50, 50, 50, 255}
-		case "black": colorVal = color.RGBA{5, 5, 20, 255}
-		case "blue_white": colorVal = color.RGBA{200, 200, 255, 200}
-		case "grey_alpha": colorVal = color.RGBA{100, 100, 100, 100}
+		case "cyan":
+			colorVal = ColCyan
+		case "yellow":
+			colorVal = ColYellow
+		case "grey":
+			colorVal = color.RGBA{200, 200, 200, 150}
+		case "dark_grey":
+			colorVal = color.RGBA{50, 50, 50, 255}
+		case "black":
+			colorVal = color.RGBA{5, 5, 20, 255}
+		case "blue_white":
+			colorVal = color.RGBA{200, 200, 255, 200}
+		case "grey_alpha":
+			colorVal = color.RGBA{100, 100, 100, 100}
 		}
 	}
 
@@ -755,34 +788,6 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 	}
 
 	g.barrage = append(g.barrage, bw)
-}
-
-			// DUPLICATE LOGIC FROM spawnWord but inline to avoid deadlock
-			scale := 2.0
-			bw := BarrageWord{
-				Text:     word,
-				X:        float64(ScreenWidth/2) + rand.Float64()*100 - 50,
-				Y:        float64(ScreenHeight/2) + rand.Float64()*100 - 50,
-				VX:       (rand.Float64() - 0.5) * 10,
-				VY:       (rand.Float64() - 0.5) * 10,
-				Scale:    scale,
-				Color:    ColRed,
-				Life:     300,
-				MaxLife:  300,
-				IsGlitch: true,
-			}
-			g.barrage = append(g.barrage, bw)
-		}
-	} else {
-		// Assume it's a full state update if not a "flash" message
-		// This will overwrite the entire g.state struct
-		var newState State
-		if err := json.Unmarshal(msg, &newState); err != nil {
-			log.Printf("Error unmarshaling state message: %v", err)
-			return
-		}
-		g.state = newState
-	}
 }
 
 func loadFont(size float64) font.Face {

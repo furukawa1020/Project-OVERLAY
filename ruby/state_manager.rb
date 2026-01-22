@@ -81,19 +81,19 @@ class StateManager
 
     if duration > 2.0 && @silence_stage == 0
       next_word = "..."
-      config = { style: 'silence_dots', color: 'grey_alpha', scale: 1.0 }
+      config = { style: 'silence_dots', color: 'grey_alpha', scale: 0.8 }
       @silence_stage = 1
     elsif duration > 5.0 && @silence_stage == 1
       next_word = "間"
-      config = { style: 'silence_ma', color: 'blue_white', vy: 0.0, scale: 2.0 }
+      config = { style: 'silence_ma', color: 'blue_white', vy: 0.0, scale: 1.0 }
       @silence_stage = 2
     elsif duration > 8.0 && @silence_stage == 2
       next_word = "沈黙"
-      config = { style: 'silence_heavy', color: 'dark_grey', vy: 15.0, scale: 3.0 }
+      config = { style: 'silence_heavy', color: 'dark_grey', vy: 15.0, scale: 1.5 }
       @silence_stage = 3
     elsif duration > 12.0 && @silence_stage == 3
       next_word = "静寂"
-      config = { style: 'silence_abyss', color: 'black', vy: -1.0, scale: 4.0 }
+      config = { style: 'silence_abyss', color: 'black', vy: -1.0, scale: 2.0 }
       @silence_stage = 4
     end
     
