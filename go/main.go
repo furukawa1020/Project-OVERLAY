@@ -37,7 +37,6 @@ var (
 	ColWhite  = color.RGBA{240, 240, 240, 255}
 	ColYellow = color.RGBA{253, 216, 53, 255}
 	ColCyan   = color.RGBA{0, 255, 255, 255}
-	ColCyan   = color.RGBA{0, 255, 255, 255}
 )
 
 type State struct {
@@ -185,19 +184,19 @@ func (g *Game) Update() error {
 	silenceDur := time.Since(g.lastWordTime)
 
 	if silenceDur > 2*time.Second && g.silenceStage == 0 {
-		g.spawnWordInternal("...", false)
+		g.spawnWordInternal("...", map[string]interface{}{"style": "silence_dots", "scale": 0.8})
 		g.silenceStage = 1
 	}
 	if silenceDur > 5*time.Second && g.silenceStage == 1 {
-		g.spawnWordInternal("間", false)
+		g.spawnWordInternal("間", map[string]interface{}{"style": "silence_ma", "scale": 1.0})
 		g.silenceStage = 2
 	}
 	if silenceDur > 8*time.Second && g.silenceStage == 2 {
-		g.spawnWordInternal("沈黙", false) // Heavy fall
+		g.spawnWordInternal("沈黙", map[string]interface{}{"style": "silence_heavy", "scale": 1.5})
 		g.silenceStage = 3
 	}
 	if silenceDur > 12*time.Second && g.silenceStage == 3 {
-		g.spawnWordInternal("静寂", false) // Another heavy fall
+		g.spawnWordInternal("静寂", map[string]interface{}{"style": "silence_abyss", "scale": 2.0})
 		g.silenceStage = 4
 	}
 
@@ -255,201 +254,13 @@ func textToColor(text string) color.RGBA {
 	}
 }
 
-// Public wrapper with Lock (safe for external calls)
-func (g *Game) spawnWord(text string, glitch bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	style := "normal"
-	if glitch {
-		style = "glitch"
-	}
-	g.spawnWordInternal(text, style)
-}
-
-// Internal implementation (Assumes Lock is held)
-func (g *Game) spawnWordInternal(text string, glitch bool) {
-	// Reset Silence Stage on legitimate input (not generated silence words)
-	isSilenceWord := (text == "..." || text == "間" || text == "沈黙" || text == "静寂")
-
-	// Semantic Categories
-	conjunctions := []string{"でも", "しかし", "だが", "逆に", "とは言え", "けど", "反対に"}
-	hesitations := []string{"えっと", "うーん", "あの", "多分", "かな", "なんか", "えー"}
-
-	isConjunction := false
-	isHesitation := false
-
-	for _, c := range conjunctions {
-		if strings.Contains(text, c) {
-			isConjunction = true
-			break
-		}
-	}
-	for _, h := range hesitations {
-		if strings.Contains(text, h) {
-			isHesitation = true
-			break
-		}
-	}
-
-	if !isSilenceWord {
-		g.silenceStage = 0
-
-		// Update Target Background based on text
-		if !glitch && g.state.CurrentState != "SPLIT" {
-			if isConjunction {
-				g.targetBgColor = color.RGBA{50, 50, 50, 255} // Grey out
-			} else {
-				g.targetBgColor = textToColor(text)
-			}
-		}
-	}
-
-	// Conversation Turn Logic (Only for real words)
-	if !isSilenceWord {
-		now := time.Now()
-		silenceDuration := now.Sub(g.lastWordTime)
-		g.lastWordTime = now
-
-		// If silence > 2.0s, switch speaker
-		if silenceDuration > 2000*time.Millisecond {
-			g.currentSpeaker = (g.currentSpeaker + 1) % 2
-		}
-
-		// Conjunctions trigger immediate turn switch (interruption)
-		if isConjunction {
-			g.currentSpeaker = (g.currentSpeaker + 1) % 2
-		}
-	}
-
-	// Physics Init
-	nuanceScale := 1.0 + (g.micVolume * 3.0) // 1.0 to 4.0
-	if nuanceScale > 4.0 {
-		nuanceScale = 4.0
-	}
-
-	scale := nuanceScale + rand.Float64()*0.5
-	if glitch {
-		scale *= 1.5
-	}
-
-	// Custom Physics for Silence Words
-	life := 600
-	colorVal := ColWhite
-	var startX, startY, vx, vy float64
-	var rot, vrot float64
-
-	if text == "..." {
-		scale = 1.0
-		life = 300
-		startX = rand.Float64() * float64(ScreenWidth)
-		startY = rand.Float64() * float64(ScreenHeight)
-		vx = (rand.Float64() - 0.5) * 0.5
-		vy = (rand.Float64() - 0.5) * 0.5         // Float gently
-		colorVal = color.RGBA{100, 100, 100, 100} // Grey transparent
-	} else if text == "間" {
-		scale = 3.0
-		life = 800
-		startX = float64(ScreenWidth) / 2
-		startY = float64(ScreenHeight) / 3
-		vx = 0
-		vy = 0.00                                 // Suspended in time (No movement)
-		colorVal = color.RGBA{200, 200, 255, 200} // Bluish White
-	} else if text == "沈黙" {
-		scale = 5.0 // Massive
-		life = 1000
-		// Random X throughout screen (Avoid edges)
-		startX = 100 + rand.Float64()*(ScreenWidth-200)
-		startY = -100 // Drop from top
-		vx = 0
-		vy = 15.0                              // Heavy drop
-		colorVal = color.RGBA{50, 50, 50, 255} // Dark Grey
-	} else if text == "静寂" {
-		scale = 7.0 // Even Bigger
-		life = 1200 // Lasts longer
-		// Random X throughout screen
-		startX = 100 + rand.Float64()*(ScreenWidth-200)
-		startY = float64(ScreenHeight) + 100 // Rise from Abyss
-		vx = 0
-		vy = -1.0                            // Slow Ascension (Rising Up)
-		colorVal = color.RGBA{5, 5, 20, 255} // Deepest Blue/Black
-	} else {
-		// Normal Word Physics
-		// Position based on Speaker
-		if g.state.CurrentState == "SPLIT" {
-			// Chaos: Center Eruption
-			startX = float64(ScreenWidth/2) + rand.Float64()*400 - 200
-			vx = (rand.Float64() - 0.5) * 10
-		} else if g.currentSpeaker == 0 {
-			// Left Speaker (throws to right)
-			startX = float64(ScreenWidth)*0.2 + rand.Float64()*100
-			vx = 5.0 + rand.Float64()*5.0
-		} else {
-			// Right Speaker (throws to left)
-			startX = float64(ScreenWidth)*0.8 - rand.Float64()*100
-			vx = -5.0 - rand.Float64()*5.0
-		}
-		startY = float64(ScreenHeight)*0.4 + rand.Float64()*200 - 100
-		vy = -5.0 - rand.Float64()*5.0
-
-		rot = (rand.Float64() - 0.5) * 0.5
-		vrot = (rand.Float64() - 0.5) * 0.1
-
-		// Apply Semantic Physics
-		if isConjunction {
-			vx *= -1.5           // REVERSE FLOW (Interruption)
-			rot = math.Pi        // UPSIDE DOWN (Inversion)
-			colorVal = ColYellow // Highlight
-			scale *= 1.2
-		}
-
-		if isHesitation {
-			vx *= 0.2                                 // Slow down
-			vy *= 0.2                                 // Float
-			vrot *= 0.05                              // No spin
-			colorVal = color.RGBA{200, 200, 200, 150} // Transparent/Pale
-			scale *= 0.8
-		}
-	}
-
-	bw := BarrageWord{
-		Text:      text,
-		X:         startX,
-		Y:         startY,
-		VX:        vx,
-		VY:        vy,
-		Scale:     scale,
-		Color:     colorVal, // Default white, draw calc handles glitch color
-		Life:      life,     // Longer life for piling up
-		MaxLife:   life,
-		IsGlitch:  glitch,
-		Rotation:  rot,  // Use local var
-		VRotation: vrot, // Use local var
-		IsResting: false,
-		IsFiller:  (len(text) <= 3 || isHesitation) && !isSilenceWord, // Simple check for fillers
-	}
-
-	if g.state.CurrentState == "SPLIT" || glitch {
-		bw.Color = ColRed
-		bw.VX *= 2.0
-		bw.VY *= 2.0
-	}
-
-	g.barrage = append(g.barrage, bw)
-}
-
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.mu.RLock()
 	currentState := g.state.CurrentState
 	vol := g.micVolume
 	g.mu.RUnlock()
 
-	// Shaft Style Background Logic
-	// SPLIT -> Red Background (Handled in Update via targetBgColor override)
-	// ALIGNED -> Dynamic Synesthetic Color (Handled in Update)
-
-	// screen.Fill(g.bgColor) // Direct fill
-
-	// Let's use a "Vignette" or simple fill for now
+	// Screen Fill
 	screen.Fill(g.bgColor)
 
 	// 1. Dynamic Background Geometry (Reacts to Audio)
@@ -790,120 +601,58 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 	g.barrage = append(g.barrage, bw)
 }
 
-func loadFont(size float64) font.Face {
-	// Try local asset first (Reliable)
-	fontPaths := []string{
-		"assets/font.otf",
-		"C:\\Windows\\Fonts\\meiryo.ttc",
-	}
+func main() {
+	game := &Game{}
 
-	var fontData []byte
-	var err error
-	var pathUsed string
-
-	for _, path := range fontPaths {
-		fontData, err = os.ReadFile(path)
-		if err == nil {
-			pathUsed = path
-			break
-		}
-	}
-	if len(fontData) == 0 {
-		log.Println("WARNING: No font found. Falling back to nil (Will Crash if used)")
-		return nil
-	}
-
-	// Parse
-	tt, err := opentype.Parse(fontData)
+	// Load Fonts
+	// Use meiryo or fall back to embedded in future (currently relying on system font)
+	tt, err := opentype.Parse(mustReadFile("assets/font.otf"))
 	if err != nil {
-		// If TTC, try collection
-		if len(pathUsed) > 3 && pathUsed[len(pathUsed)-3:] == "ttc" {
-			coll, err := opentype.ParseCollection(fontData)
-			if err == nil && coll.NumFonts() > 0 {
-				tt, _ = coll.Font(0) // Use first font
-			}
+		// Fallback for Windows Dev Environment if assets/font.otf missing
+		tt, err = opentype.Parse(mustReadFile("C:\\Windows\\Fonts\\meiryo.ttc"))
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
 
-	if tt == nil {
-		log.Printf("Failed to parse font from %s: %v", pathUsed, err)
-		return nil
-	}
-
-	face, err := opentype.NewFace(tt, &opentype.FaceOptions{
-		Size:    size,
-		DPI:     72,
+	const dpi = 72
+	game.jpFace, _ = opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    24,
+		DPI:     dpi,
 		Hinting: font.HintingFull,
 	})
-	if err != nil {
-		log.Printf("Failed to create face: %v", err)
-		return nil
-	}
+	game.jpFaceBig, _ = opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    72,
+		DPI:     dpi,
+		Hinting: font.HintingFull,
+	})
 
-	return face
-}
+	// Audio Init
+	game.speech = NewSpeechEngine()
+	game.speech.Start()
+	game.audioChan = game.speech.VolChan
 
-// initAudio function removed as per instruction
-
-func main() {
-	game := &Game{
-		audioChan:     make(chan float64, 10),
-		bgColor:       ColBlack,
-		targetBgColor: ColBlack,
-	}
-	game.jpFace = loadFont(64)     // Standard Text
-	game.jpFaceBig = loadFont(200) // Huge Impact Text
+	// Connect to Ruby
 	game.connect()
 
-	// Start Speech Engine
-	se := NewSpeechEngine()
-	if se != nil {
-		game.speech = se
-		go se.Start()
+	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
+	ebiten.SetWindowTitle("Overlay - Shaft Style")
+	ebiten.SetWindowFloating(true)
+	ebiten.SetWindowDecorated(false)
+	// Transparent window allowed? Ebiten 2.5+ supports SetScreenTransparent(true) with some configs
+	ebiten.SetScreenTransparent(true)
 
-		// Pipe channels
-		go func() {
-			for {
-				select {
-				case vol := <-se.VolChan:
-					game.audioChan <- vol
-				case txt := <-se.TextChan:
-					fmt.Printf("RECOGNIZED: %s\n", txt)
-
-					// 1. Send to Ruby (If connected)
-					if game.conn != nil {
-						msg := map[string]string{
-							"type": "speech_text",
-							"text": txt,
-						}
-						game.conn.WriteJSON(msg)
-					}
-
-					// 2. Local Atmosphere Logic (Fallback) - DISABLED (Migrated to Ruby)
-					/*
-						dangerWords := []string{"嘘", "矛盾", "違う", "だめ", "無理", "変", "おかしい", "バグ", "ミス", "否定", "NO", "嫌", "怖い"}
-						isDanger := false
-						for _, dw := range dangerWords {
-							if strings.Contains(txt, dw) {
-								isDanger = true
-								break
-							}
-						}
-						isGlitch := len(txt) < 3
-						if isDanger { ... }
-						game.spawnWord(txt, isGlitch)
-					*/
-				}
-			}
-		}()
-	} else {
-		log.Println("Speech Engine failed to initialize (Missing model?)")
-	}
-
-	ebiten.SetWindowSize(ScreenWidth/2, ScreenHeight/2)
-	ebiten.SetWindowTitle("OVERLAY")
-	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func mustReadFile(path string) []byte {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		// Silent fail or default?
+		// log.Printf("Failed to load font: %v", err)
+		return nil
+	}
+	return b
 }
