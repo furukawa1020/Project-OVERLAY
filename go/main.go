@@ -384,14 +384,44 @@ func (g *Game) connect() {
 			log.Println("Connected to Server!")
 			g.conn = c
 
-			// Listen loop
-			for {
-				_, message, err := c.ReadMessage()
-				if err != nil {
-					log.Println("Read error (Disconnected):", err)
-					break // Break inner loop to reconnect
+			// Channel to signal disconnect
+			done := make(chan struct{})
+
+			// Read Loop
+			go func() {
+				defer close(done)
+				for {
+					_, message, err := c.ReadMessage()
+					if err != nil {
+						log.Println("Read error (Disconnected):", err)
+						return
+					}
+					g.handleMessage(message)
 				}
-				g.handleMessage(message)
+			}()
+
+			// Write Loop (Consume Speech)
+		loop:
+			for {
+				select {
+				case <-done:
+					break loop
+				case text := <-g.speech.TextChan:
+					// Send Speech to Ruby
+					// Note: ActionCable might expect specific format, using simplified JSON here
+					// Actually, previous implementation used standard JSON payload.
+					// Let's stick to simple "type": "speech_text" if Ruby expects it.
+					// Checking app.rb: it expects `data['type'] == 'speech_text'` in `on :message`.
+
+					payload := map[string]string{
+						"type": "speech_text",
+						"text": text,
+					}
+					if err := c.WriteJSON(payload); err != nil {
+						log.Println("Write error:", err)
+						break loop
+					}
+				}
 			}
 
 			g.conn.Close()

@@ -95,6 +95,12 @@ class StateManager
       next_word = "静寂"
       config = { style: 'silence_abyss', color: 'black', vy: -1.0, scale: 2.0 }
       @silence_stage = 4
+    elsif duration > 17.0 && @silence_stage == 4
+      # Loop / Keep spawning Abyss words periodically
+      next_word = "..." 
+      config = { style: 'silence_dots', color: 'grey_alpha', scale: 1.0 }
+      @last_speech_time = Time.now - 2.0 # Reset slightly to loop back to dots? No, let's just spawn and keep stage 4
+      @last_speech_time = Time.now - 12.0 # Keeps it at stage 4 threshold
     end
     
     return next_word, config
