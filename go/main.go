@@ -64,9 +64,12 @@ type Game struct {
 	frameCount  int
 	videoGlitch float64 // For Shaft cut effect
 	words       []string
-	// 	flashWord   string
-	// 	flashTTL    int
-	barrage []BarrageWord
+	barrage     []BarrageWord
+
+	// Effects
+	shakeAmount    float64
+	flashIntensity float64
+	gears          []Gear
 
 	// Synesthetic state
 	bgColor       color.RGBA
@@ -76,6 +79,12 @@ type Game struct {
 	lastWordTime   time.Time
 	currentSpeaker int // 0: Left, 1: Right
 	silenceStage   int // 0: None, 1: Dots, 2: Ma, 3: Chinmoku
+}
+
+type Gear struct {
+	X, Y, Radius, Rotation, Speed float64
+	Teeth                         int
+	Color                         color.RGBA
 }
 
 type BarrageWord struct {
@@ -102,6 +111,23 @@ type BarrageWord struct {
 func (g *Game) Update() error {
 	g.mu.Lock()
 	g.frameCount++
+
+	// Init Gears (Lazy)
+	if len(g.gears) == 0 {
+		g.initGears()
+	}
+
+	// Decay Effects
+	g.shakeAmount *= 0.9
+	if g.shakeAmount < 0.5 {
+		g.shakeAmount = 0
+	}
+	g.flashIntensity *= 0.85
+
+	// Rotate Gears
+	for i := range g.gears {
+		g.gears[i].Rotation += g.gears[i].Speed
+	}
 
 	// Init channel if nil (hacky lazy init or do in main)
 	if g.audioChan == nil {
@@ -254,27 +280,83 @@ func textToColor(text string) color.RGBA {
 	}
 }
 
+func (g *Game) initGears() {
+	// Create some aesthetic gears
+	g.gears = []Gear{
+		{X: 100, Y: 100, Radius: 150, Teeth: 12, Speed: 0.005, Color: color.RGBA{40, 40, 40, 255}},
+		{X: ScreenWidth - 100, Y: ScreenHeight - 150, Radius: 200, Teeth: 16, Speed: -0.003, Color: color.RGBA{30, 30, 30, 255}},
+		{X: ScreenWidth / 2, Y: -100, Radius: 300, Teeth: 24, Speed: 0.002, Color: color.RGBA{20, 20, 20, 255}},
+	}
+}
+
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.mu.RLock()
 	currentState := g.state.CurrentState
 	vol := g.micVolume
+	shake := g.shakeAmount
+	flash := g.flashIntensity
 	g.mu.RUnlock()
 
-	// Screen Fill
+	// Calculate Shake Offset
+	dx, dy := 0.0, 0.0
+	if shake > 0 {
+		dx = (rand.Float64() - 0.5) * shake
+		dy = (rand.Float64() - 0.5) * shake
+	}
+
+	// Create a temporary image for the world content (to shake everything together)
+	// Actually, just apply offset to drawing functions is cheaper/easier here
+
+	// Screen Fill (Background)
 	screen.Fill(g.bgColor)
 
+	// 0. Background Gears
+	g.drawGears(screen, dx, dy)
+
 	// 1. Dynamic Background Geometry (Reacts to Audio)
-	g.drawGeometry(screen)
+	g.drawGeometry(screen, dx, dy)
 
 	// 2. Typography (The "Conversation")
-	g.drawBarrage(screen)
+	g.drawBarrage(screen, dx, dy)
+
+	// 3. Flash Overlay
+	if flash > 0.01 {
+		// Draw white rect with alpha
+		alpha := uint8(flash * 255)
+		vector.DrawFilledRect(screen, 0, 0, float32(ScreenWidth), float32(ScreenHeight), color.RGBA{255, 255, 255, alpha}, true)
+	}
 
 	// Debug info
 	ebitenutil.DebugPrint(screen, fmt.Sprintf("Vol: %.2f | State: %s", vol, currentState))
 }
 
-func (g *Game) drawGeometry(screen *ebiten.Image) {
-	cx, cy := float32(ScreenWidth/2), float32(ScreenHeight/2)
+func (g *Game) drawGears(screen *ebiten.Image, dx, dy float64) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	for _, gear := range g.gears {
+		// Simple Gear: Circle + Teeth
+		cx, cy := float32(gear.X+dx), float32(gear.Y+dy)
+
+		// Draw Main Circle
+		vector.DrawFilledCircle(screen, cx, cy, float32(gear.Radius), gear.Color, true)
+
+		// Draw Teeth (Lines radiating out)
+		for i := 0; i < gear.Teeth; i++ {
+			theta := gear.Rotation + (float64(i) / float64(gear.Teeth) * 2 * math.Pi)
+			tx := cx + float32(math.Cos(theta))*float32(gear.Radius+20)
+			ty := cy + float32(math.Sin(theta))*float32(gear.Radius+20)
+			// Thick line for tooth
+			vector.StrokeLine(screen, cx, cy, tx, ty, 20, gear.Color, true)
+		}
+
+		// Inner hole (Background color)
+		vector.DrawFilledCircle(screen, cx, cy, float32(gear.Radius*0.3), g.bgColor, true)
+	}
+}
+
+func (g *Game) drawGeometry(screen *ebiten.Image, dx, dy float64) {
+	cx, cy := float32(ScreenWidth/2+dx), float32(ScreenHeight/2+dy)
 
 	g.mu.RLock()
 	micVolume := g.micVolume
@@ -303,7 +385,7 @@ func (g *Game) drawGeometry(screen *ebiten.Image) {
 	vector.StrokeLine(screen, x1, y1, x2, y2, thickness, col, true)
 }
 
-func (g *Game) drawBarrage(screen *ebiten.Image) {
+func (g *Game) drawBarrage(screen *ebiten.Image, dx, dy float64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -357,7 +439,7 @@ func (g *Game) drawBarrage(screen *ebiten.Image) {
 		op.GeoM.Rotate(b.Rotation + wave)
 
 		// Move to Position
-		op.GeoM.Translate(b.X+jx, b.Y+jy)
+		op.GeoM.Translate(b.X+jx+dx, b.Y+jy+dy)
 
 		// Draw
 		screen.DrawImage(b.Image, op)
@@ -583,6 +665,14 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 	if val, ok := config["scale"].(float64); ok {
 		scale = val
 	} // Added Override
+
+	// Effect Triggers
+	if val, ok := config["shake"].(float64); ok {
+		g.shakeAmount += val
+	}
+	if val, ok := config["flash"].(bool); ok && val {
+		g.flashIntensity = 1.0
+	}
 
 	if colStr, ok := config["color"].(string); ok {
 		switch colStr {

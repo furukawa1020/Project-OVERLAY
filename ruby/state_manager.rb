@@ -53,7 +53,16 @@ class StateManager
       return config
     end
     
-    # Semantic Logic
+    # Impact Logic (Shaft Cut-ins)
+    if ["絶対", "嘘", "違う", "矛盾", "変", "おかしい"].any? { |w| text.include?(w) }
+      config[:style] = 'impact' # Special style for Go to handle
+      config[:flash] = true
+      config[:shake] = 20.0 # High instant shake
+      config[:color] = 'red'
+      config[:scale] = 2.5
+      return config
+    end
+
     if ["でも", "しかし", "だが", "逆に", "とは言え", "けど", "反対に"].any? { |w| text.include?(w) }
       config[:style] = 'conjunction'
       config[:scalex] = -1.0
