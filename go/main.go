@@ -678,6 +678,8 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 		switch colStr {
 		case "cyan":
 			colorVal = ColCyan
+		case "red":
+			colorVal = ColRed
 		case "yellow":
 			colorVal = ColYellow
 		case "grey":
@@ -704,7 +706,7 @@ func (g *Game) spawnWordInternal(text string, config map[string]interface{}) {
 		Color:     colorVal,
 		Life:      life,
 		MaxLife:   life,
-		IsGlitch:  (style == "glitch"),
+		IsGlitch:  (style == "glitch" || style == "impact"),
 		Rotation:  rot,
 		VRotation: vrot,
 		IsResting: false,
