@@ -758,7 +758,7 @@ func main() {
 	game.connect()
 
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
-	ebiten.SetWindowTitle("Overlay - Shaft Style")
+	ebiten.SetWindowTitle("脳内劇場")
 	ebiten.SetWindowFloating(true)
 	ebiten.SetWindowDecorated(false)
 	// Transparent window allowed? Ebiten 2.5+ supports SetScreenTransparent(true) with some configs
