@@ -140,7 +140,7 @@ func (g *Game) Update() error {
 	}
 
 	// 3. Check Silence (Brain Loop)
-	if word, cfg, ok := g.brain.CheckSilence(); ok {
+	if _, cfg, ok := g.brain.CheckSilence(); ok {
 		g.spawnWordFromConfig(cfg)
 	}
 
